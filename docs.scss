@@ -807,12 +807,50 @@ $_B_DOCS: 'docs';
           border: to-rem($space-3xs) solid currentColor;
           padding: to-rem($space-2xs) to-rem($space-sm);
           text-align: left;
+          vertical-align: top;
         }
 
         th {
           background: var(--bg-secondary);
           font-family: var(--font-mono);
         }
+
+        // Pivot tables (coverage-summary shape) — the outer key is the row
+        // header; long file paths wrap instead of stretching the table.
+        th[scope='row'] {
+          font-weight: 400;
+          color: var(--text-secondary);
+          overflow-wrap: anywhere;
+          max-width: 45ch;
+        }
+      }
+
+      // Compact `key value` stat pairs inside pivot cells — a flat coverage
+      // group (total/covered/skipped/pct) reads on one line, wrapping as a
+      // block between pairs rather than mid-pair.
+      .docs-json-kv {
+        display: inline-flex;
+        align-items: baseline;
+        gap: to-rem($space-2xs);
+        margin-right: to-rem($space-sm);
+        white-space: nowrap;
+
+        &:last-child {
+          margin-right: 0;
+        }
+      }
+
+      .docs-json-k {
+        font-family: var(--font-mono);
+        font-size: to-rem($space-md);
+        color: var(--text-secondary);
+        opacity: 0.8;
+      }
+
+      // Meters shrink inside cells so a 4-column coverage table stays compact.
+      .docs-json-kv .docs-json-pct-bar,
+      .docs-json-table td .docs-json-pct-bar {
+        width: to-rem($space-xl);
       }
 
       .docs-json-list {
