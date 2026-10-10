@@ -1,0 +1,66 @@
+// ════════════════════════════════════════════════════════════════════════════
+//  docs/_chrome.scss — the .docs portal chrome — container flex column + the GL thread backdrop and persistent 3D architecture scene layers.
+//  Imported by docs.scss (manifest) — not compiled standalone.
+// ════════════════════════════════════════════════════════════════════════════
+
+.#{$_B_DOCS} {
+  position: relative;
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  color: var(--text-primary);
+  font-family: var(--font-primary);
+  font-size: to-rem($space-xl);
+  line-height: 1.6;
+  padding-top: to-rem($space-4xl);
+  box-sizing: border-box;
+
+  // ── GL thread backdrop + persistent 3D architecture scene ────────────
+  // Both are fixed, viewport-sized layers behind the content column —
+  // the scene stays mounted on every docs page so folder navigation is
+  // always available (orbit/pinch on exposed areas, tap-to-pick).
+  &-gl,
+  &-scene {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    color: var(--text-primary);
+  }
+
+  &-gl {
+    pointer-events: none;
+  }
+
+  // The scene needs pointer events where the content column leaves it
+  // exposed — OrbitControls owns rotate/pinch, taps pick nodes. Ink is
+  // the project's turquoise accent *contrast* variant: cyan on dark,
+  // deep teal on light — the raw accent is invisible on white.
+  &-scene {
+    color: var(--color-accent-contrast);
+    cursor: grab;
+
+    &:active {
+      cursor: grabbing;
+    }
+  }
+
+  // CSS fallback: soft drifting gradient band when WebGL is off.
+  &-gl-fallback &-gl {
+    background: linear-gradient(115deg, transparent 30%, currentColor 45%, transparent 60%);
+    background-size: 300% 300%;
+    opacity: 0.04;
+    animation: #{$_B_DOCS}-drift 18s linear infinite;
+  }
+
+  @keyframes #{$_B_DOCS}-drift {
+    from {
+      background-position: 0% 0%;
+    }
+    to {
+      background-position: 100% 100%;
+    }
+  }
+}

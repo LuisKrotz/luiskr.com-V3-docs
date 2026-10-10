@@ -1,0 +1,76 @@
+// ════════════════════════════════════════════════════════════════════════════
+//  docs/_content.scss — the content column — %MAXAREA gutter contract; containers stay pointer-transparent so the fixed scene stays draggable.
+//  Imported by docs.scss (manifest) — not compiled standalone.
+// ════════════════════════════════════════════════════════════════════════════
+
+.#{$_B_DOCS} {
+  // ── Content column — the project's max-area gutter contract ──────────
+  // The containers themselves are pointer-transparent so the fixed scene
+  // behind stays draggable wherever no interactive surface covers it;
+  // interactive children re-enable hit-testing explicitly.
+  &-header,
+  &-crumbs,
+  &-body,
+  &-main,
+  &-grid {
+    pointer-events: none;
+  }
+
+  &-header,
+  &-body {
+    @extend %MAXAREA;
+
+    z-index: 1;
+  }
+
+  &-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: to-rem($space-sm) to-rem($space-md);
+    margin-bottom: to-rem($space-xl);
+    padding: to-rem($space-2xs) to-rem($space-md);
+    background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
+    -webkit-backdrop-filter: blur(to-rem($space-xs));
+    backdrop-filter: blur(to-rem($space-xs));
+    border-radius: var(--radius-md);
+  }
+
+  &-title {
+    margin: 0;
+    font-weight: 100;
+    font-size: to-rem($space-3xl);
+    line-height: 1;
+    letter-spacing: 0.04em;
+  }
+
+  &-updated {
+    margin-left: auto;
+    align-self: flex-end;
+    font-size: to-rem($space-lg);
+    opacity: 0.6;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &-body {
+    display: grid;
+    // minmax(0,1fr): a bare 1fr track floors at min-content, so min-content
+    // payloads (istanbul tables, code <pre>) would blow the column past
+    // the viewport. The 0 floor lets the track shrink and defers the
+    // overflow to the inner scrollports.
+    grid-template-columns: minmax(0, 1fr);
+    gap: to-rem($space-xl);
+    flex: 1;
+
+    @include layout-1024() {
+      grid-template-columns: to-rem($space-7xl) minmax(0, 1fr);
+      align-items: start;
+    }
+  }
+
+  &-main {
+    // Grid items default to min-width:auto — same min-content floor —
+    // release it so the viewer can shrink to the track.
+    min-width: 0;
+  }
+}

@@ -1,0 +1,65 @@
+// ════════════════════════════════════════════════════════════════════════════
+//  docs/_crumbs.scss — the editable breadcrumbs row.
+//  Imported by docs.scss (manifest) — not compiled standalone.
+// ════════════════════════════════════════════════════════════════════════════
+
+.#{$_B_DOCS} {
+  // ── Editable breadcrumbs ──────────────────────────────────────────────
+  &-crumbs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: to-rem($space-2xs);
+    margin-bottom: to-rem($space-md);
+    padding: to-rem($space-2xs) to-rem($space-md);
+    font-size: to-rem($space-lg);
+    background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
+    -webkit-backdrop-filter: blur(to-rem($space-xs));
+    backdrop-filter: blur(to-rem($space-xs));
+    border-radius: var(--radius-md);
+  }
+
+  &-crumb {
+    pointer-events: auto;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    padding: to-rem($space-2xs) to-rem($space-2xs);
+    opacity: 0.75;
+    user-select: text;
+
+    &::after {
+      content: ' /';
+      opacity: 0.5;
+    }
+
+    &:focus-visible {
+      opacity: 1;
+      outline: to-rem($space-3xs) solid var(--focus-ring);
+      border-radius: var(--radius-2xs);
+    }
+  }
+
+  &-crumb-edit {
+    pointer-events: auto;
+    flex: 1;
+    min-width: to-rem($space-4xl);
+    background: transparent;
+    border: to-rem($space-3xs) dashed currentColor;
+    border-radius: var(--radius-2xs);
+    color: inherit;
+    font: inherit;
+    font-family: var(--font-mono);
+    font-size: to-rem($space-lg);
+    padding: to-rem($space-3xs) to-rem($space-2xs);
+    opacity: 0.6;
+
+    &:focus {
+      opacity: 1;
+      border-style: solid;
+      outline: none;
+    }
+  }
+}

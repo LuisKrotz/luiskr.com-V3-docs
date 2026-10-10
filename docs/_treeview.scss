@@ -1,0 +1,159 @@
+// ════════════════════════════════════════════════════════════════════════════
+//  docs/_treeview.scss — the treeview panel — collapsible under a toggle on mobile/tablet; folder/file nav list.
+//  Imported by docs.scss (manifest) — not compiled standalone.
+// ════════════════════════════════════════════════════════════════════════════
+
+.#{$_B_DOCS} {
+  // ── Treeview — collapsible panel under a toggle on mobile/tablet ─────
+  &-nav-toggle {
+    @extend %RESETBTN;
+
+    pointer-events: auto;
+    display: block;
+    width: 100%;
+    font: inherit;
+    font-size: to-rem($space-lg);
+    text-align: left;
+    color: inherit;
+    border: to-rem($space-3xs) solid currentColor;
+    border-radius: var(--radius-2xs);
+    padding: to-rem($space-sm) to-rem($space-md);
+    margin-bottom: to-rem($space-sm);
+    user-select: text;
+
+    &::before {
+      content: '▸ ';
+    }
+
+    &[aria-expanded='true']::before {
+      content: '▾ ';
+    }
+
+    &:focus-visible {
+      outline: to-rem($space-3xs) solid var(--focus-ring);
+      outline-offset: to-rem($space-3xs);
+    }
+
+    @include layout-1024() {
+      display: none;
+    }
+  }
+
+  &-nav {
+    pointer-events: auto;
+    display: none;
+    max-height: 70vh;
+    overflow: auto;
+    // Translucent surface + blur — the fixed scene backdrop stays visible
+    // around the edges without fighting the tree text for contrast.
+    background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+    -webkit-backdrop-filter: blur(to-rem($space-xs));
+    backdrop-filter: blur(to-rem($space-xs));
+    border-radius: var(--radius-2xs);
+
+    .#{$_B_DOCS}-nav-open & {
+      display: block;
+    }
+
+    @include layout-1024() {
+      display: block;
+      position: sticky;
+      top: to-rem($space-xl);
+    }
+  }
+
+  &-tree {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: to-rem($space-lg);
+
+    @include layout-960() {
+      font-size: to-rem($space-xl);
+    }
+
+    li {
+      position: relative;
+    }
+
+    // Nested levels draw the ASCII-tree shape: a vertical rail running the
+    // whole branch (cut to the stub at the last sibling → `└─`) plus a
+    // horizontal stub landing mid-row on each item.
+    ul {
+      list-style: none;
+      padding-left: to-rem($space-md);
+      margin: 0;
+
+      li {
+        &::before,
+        &::after {
+          content: '';
+          position: absolute;
+          left: -#{to-rem($space-sm)};
+          background: color-mix(in srgb, currentColor 24%, transparent);
+        }
+
+        &::before {
+          top: 0;
+          bottom: 0;
+          width: to-rem($space-hairline);
+        }
+
+        &::after {
+          top: calc(#{to-rem($space-sm)} + 0.6em);
+          width: to-rem($space-sm);
+          height: to-rem($space-hairline);
+        }
+
+        &:last-child::before {
+          bottom: auto;
+          height: calc(#{to-rem($space-sm)} + 0.6em);
+        }
+      }
+    }
+  }
+
+  &-tree-item {
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    // ≥34px row + side padding — a comfortable tap target on touch.
+    padding: to-rem($space-sm) to-rem($space-2xs);
+    width: 100%;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.85;
+    user-select: text;
+
+    // Disclosure triangle for dirs — border-drawn so no glyph literal is
+    // needed; rotates when the branch is open.
+    &[aria-expanded]::before {
+      content: '';
+      display: inline-block;
+      width: 0;
+      height: 0;
+      margin-right: to-rem($space-2xs);
+      border-top: to-rem($space-3xs) solid transparent;
+      border-bottom: to-rem($space-3xs) solid transparent;
+      border-left: to-rem($space-3xs) solid currentColor;
+      vertical-align: middle;
+      transition: transform 0.15s ease;
+    }
+
+    &[aria-expanded='true']::before {
+      transform: rotate(90deg);
+    }
+
+    &[aria-current='page'],
+    &:focus-visible {
+      opacity: 1;
+      outline: to-rem($space-3xs) solid var(--focus-ring);
+      outline-offset: to-rem($space-3xs);
+      border-radius: var(--radius-2xs);
+    }
+  }
+}

@@ -1,0 +1,74 @@
+// ════════════════════════════════════════════════════════════════════════════
+//  docs/_grid.scss — the folder/file grid with generated SVG glyphs.
+//  Imported by docs.scss (manifest) — not compiled standalone.
+// ════════════════════════════════════════════════════════════════════════════
+
+.#{$_B_DOCS} {
+  // ── Folder/file grid with generated glyphs ────────────────────────────
+  &-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(to-rem($space-5xl), 1fr));
+    gap: to-rem($space-md);
+  }
+
+  &-card {
+    pointer-events: auto;
+    background: color-mix(in srgb, var(--bg-primary) 90%, transparent);
+    -webkit-backdrop-filter: blur(to-rem($space-xs));
+    backdrop-filter: blur(to-rem($space-xs));
+    border: to-rem($space-3xs) solid transparent;
+    border-radius: var(--radius-md);
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: to-rem($space-2xs);
+    padding: to-rem($space-md) to-rem($space-sm);
+    transition: border-color 0.4s ease;
+
+    &:focus-visible,
+    &:hover {
+      border-color: currentColor;
+      outline: none;
+    }
+
+    &:focus-visible {
+      outline: to-rem($space-3xs) solid var(--focus-ring);
+      outline-offset: to-rem($space-3xs);
+    }
+  }
+
+  &-card-art {
+    width: to-rem($space-4xl);
+    height: to-rem($space-3xl);
+    display: block;
+  }
+
+  &-card-label {
+    font-size: to-rem($space-lg);
+    word-break: break-word;
+    text-align: center;
+  }
+
+  // Generated folder glyph — strokes follow the theme ink.
+  &-folder {
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+
+  &-folder-body {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+  }
+
+  &-folder-thread {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 0.6;
+    opacity: 0.55;
+  }
+}

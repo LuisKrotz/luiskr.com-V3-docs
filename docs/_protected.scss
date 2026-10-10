@@ -1,0 +1,16 @@
+// ════════════════════════════════════════════════════════════════════════════
+//  docs/_protected.scss — the copy-protection surface + architecture-scene hidden state.
+//  Imported by docs.scss (manifest) — not compiled standalone.
+// ════════════════════════════════════════════════════════════════════════════
+
+.#{$_B_DOCS} {
+  // ── Architecture scene hidden state ──────────────────────────────────
+  &-scene-off {
+    display: none;
+  }
+
+  // ── Copy protection surface ───────────────────────────────────────────
+  &-protected {
+    user-select: none;
+  }
+}

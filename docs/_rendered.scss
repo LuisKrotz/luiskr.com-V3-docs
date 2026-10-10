@@ -1,0 +1,369 @@
+// ════════════════════════════════════════════════════════════════════════════
+//  docs/_rendered.scss — rendered content surfaces — GitHub-style markdown, JSON trees, sanitized HTML reports.
+//  Imported by docs.scss (manifest) — not compiled standalone.
+// ════════════════════════════════════════════════════════════════════════════
+
+.#{$_B_DOCS} {
+  // ── Rendered content — markdown, JSON trees, sanitized html reports ──
+  &-content {
+    overflow: auto;
+    max-width: 100%;
+
+    // Generic element styling for markdown payloads — rendered html
+    // reports (.docs-html) keep their own inlined styles instead.
+    .docs-md {
+      max-width: 75ch;
+      line-height: 1.6;
+      font-size: to-rem($space-lg);
+
+      @include layout-960() {
+        font-size: to-rem($space-xl);
+      }
+
+      h1,
+      h2 {
+        border-bottom: to-rem($space-3xs) solid currentColor;
+        padding-bottom: to-rem($space-2xs);
+        font-weight: 200;
+      }
+
+      h3,
+      h4,
+      h5,
+      h6 {
+        font-weight: 300;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: underline;
+        text-underline-offset: to-rem($space-3xs);
+      }
+
+      code {
+        font-family: var(--font-mono);
+        font-size: 0.9em;
+        background: var(--bg-secondary);
+        padding: to-rem($space-3xs) to-rem($space-2xs);
+        border-radius: var(--radius-2xs);
+      }
+
+      pre {
+        font-family: var(--font-mono);
+        font-size: to-rem($space-lg);
+        line-height: 1.5;
+        padding: to-rem($space-md);
+        overflow: auto;
+        background: var(--bg-secondary);
+        border-radius: var(--radius-2xs);
+
+        code {
+          background: none;
+          padding: 0;
+        }
+      }
+
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: to-rem($space-lg);
+        display: block;
+        overflow-x: auto;
+
+        th,
+        td {
+          border: to-rem($space-3xs) solid currentColor;
+          padding: to-rem($space-2xs) to-rem($space-sm);
+          text-align: left;
+        }
+
+        th {
+          background: var(--bg-secondary);
+        }
+
+        tr:nth-child(even) td {
+          background: var(--bg-secondary);
+        }
+      }
+
+      blockquote {
+        border-left: to-rem($space-3xs) solid currentColor;
+        margin: to-rem($space-sm) 0;
+        padding-left: to-rem($space-md);
+        opacity: 0.8;
+      }
+
+      ul,
+      ol {
+        padding-left: to-rem($space-xl);
+      }
+
+      hr {
+        border: 0;
+        border-top: to-rem($space-3xs) solid currentColor;
+        opacity: 0.4;
+        margin: to-rem($space-lg) 0;
+      }
+
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+    }
+
+    // Sanitized html reports (istanbul coverage, generated docs): their
+    // body/html selectors are remapped onto this wrapper at render time,
+    // so it must supply the light paper surface those rules assume —
+    // otherwise the report's dark text lands on the dark portal.
+    .docs-html {
+      max-width: none;
+      padding: to-rem($space-md);
+      background: var(--color-white-raw);
+      border-radius: var(--radius-md);
+      color-scheme: light;
+      overflow: auto;
+
+      // Istanbul report regions are min-content wide (the 5-metric
+      // summary table ~840px, code <pre> wider): give each its own
+      // scrollport so the title, stat row, hints and filter stay
+      // viewport-fit instead of pushing the whole pane sideways.
+      table.coverage-summary,
+      pre {
+        display: block;
+        overflow-x: auto;
+        max-width: 100%;
+        overscroll-behavior-inline: contain;
+      }
+
+      // Long file paths wrap inside their cell rather than widening it.
+      table.coverage-summary td,
+      table.coverage-summary td a {
+        overflow-wrap: anywhere;
+      }
+
+      // Mobile: the istanbul .pad1 chrome + our own padding both shrink so
+      // the report's readable area keeps most of a narrow viewport.
+      @media (max-width: $bk-768) {
+        padding: to-rem($space-2xs);
+
+        .pad1 {
+          padding: to-rem($space-2xs);
+        }
+      }
+    }
+
+    // Parsed JSON surface — real numbers, key/field rows and tables.
+    .docs-json {
+      font-size: to-rem($space-lg);
+      max-width: 75ch;
+
+      @include layout-960() {
+        font-size: to-rem($space-xl);
+      }
+
+      .docs-json-obj {
+        margin: 0;
+      }
+
+      .docs-json-row {
+        display: grid;
+        grid-template-columns: minmax(to-rem($space-6xl), auto) 1fr;
+        gap: to-rem($space-md);
+        padding: to-rem($space-3xs) 0;
+        border-bottom: to-rem($space-3xs) dotted color-mix(in srgb, currentColor 30%, transparent);
+        align-items: baseline;
+
+        > dt {
+          font-family: var(--font-mono);
+          font-size: to-rem($space-lg);
+          color: var(--text-secondary);
+          overflow-wrap: anywhere;
+        }
+
+        > dd {
+          margin: 0;
+          min-width: 0;
+          overflow-x: auto;
+        }
+
+        // Nested groups indent under their key.
+        > dd .docs-json-obj,
+        > dd .docs-json-table,
+        > dd .docs-json-list {
+          margin: to-rem($space-3xs) 0;
+        }
+      }
+
+      .docs-json-num {
+        font-variant-numeric: tabular-nums;
+        font-weight: 400;
+      }
+
+      .docs-json-str {
+        color: var(--text-secondary);
+        overflow-wrap: anywhere;
+      }
+
+      .docs-json-bool,
+      .docs-json-null {
+        font-family: var(--font-mono);
+        opacity: 0.8;
+      }
+
+      .docs-json-table {
+        border-collapse: collapse;
+        font-size: to-rem($space-lg);
+        display: block;
+        overflow-x: auto;
+
+        th,
+        td {
+          border: to-rem($space-3xs) solid currentColor;
+          padding: to-rem($space-2xs) to-rem($space-sm);
+          text-align: left;
+          vertical-align: top;
+        }
+
+        th {
+          background: var(--bg-secondary);
+          font-family: var(--font-mono);
+        }
+
+        // Pivot tables (coverage-summary shape) — the outer key is the row
+        // header; long file paths wrap instead of stretching the table.
+        th[scope='row'] {
+          font-weight: 400;
+          color: var(--text-secondary);
+          overflow-wrap: anywhere;
+          max-width: 45ch;
+        }
+      }
+
+      // Compact `key value` stat pairs inside pivot cells — a flat coverage
+      // group (total/covered/skipped/pct) reads on one line, wrapping as a
+      // block between pairs rather than mid-pair.
+      .docs-json-kv {
+        display: inline-flex;
+        align-items: baseline;
+        gap: to-rem($space-2xs);
+        margin-right: to-rem($space-sm);
+        white-space: nowrap;
+
+        &:last-child {
+          margin-right: 0;
+        }
+      }
+
+      .docs-json-k {
+        font-family: var(--font-mono);
+        font-size: to-rem($space-md);
+        color: var(--text-secondary);
+        opacity: 0.8;
+      }
+
+      // Meters shrink inside cells so a 4-column coverage table stays compact.
+      .docs-json-kv .docs-json-pct-bar,
+      .docs-json-table td .docs-json-pct-bar {
+        width: to-rem($space-xl);
+      }
+
+      .docs-json-list {
+        margin: 0;
+        padding-left: to-rem($space-xl);
+      }
+
+      // Percentage meter — the coverage-summary "real numbers" treatment.
+      .docs-json-pct {
+        display: inline-flex;
+        align-items: center;
+        gap: to-rem($space-2xs);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .docs-json-pct-bar {
+        display: inline-block;
+        width: to-rem($space-4xl);
+        height: to-rem($space-sm);
+        background: var(--bg-secondary);
+        border: to-rem($space-3xs) solid currentColor;
+        border-radius: var(--radius-2xs);
+        position: relative;
+        overflow: hidden;
+        vertical-align: middle;
+
+        &::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          width: calc(var(--docs-json-pct) * 1%);
+          background: currentColor;
+          opacity: 0.7;
+        }
+      }
+
+      .docs-json-nest,
+      .docs-json-empty,
+      .docs-json-more {
+        font-family: var(--font-mono);
+        opacity: 0.6;
+      }
+
+      .docs-json-link {
+        color: inherit;
+      }
+    }
+
+    // Mermaid diagrams — a themed surface; edge paths get a slow marching
+    // dash so flowcharts read as living flows (the "fully animated"
+    // contract), tuned subtle like the rest of the backdrop.
+    .docs-mermaid {
+      padding: to-rem($space-md);
+      background: var(--bg-secondary);
+      border: to-rem($space-3xs) solid color-mix(in srgb, currentColor 20%, transparent);
+      border-radius: var(--radius-2xs);
+      overflow-x: auto;
+      text-align: center;
+
+      svg {
+        max-width: 100%;
+        height: auto;
+      }
+
+      .edgePath path,
+      .flowchart-link,
+      .edgePaths .path {
+        stroke-dasharray: to-rem($space-sm) to-rem($space-2xs);
+        animation: #{$_B_DOCS}-edge-flow 6s linear infinite;
+      }
+
+      .node rect,
+      .node circle,
+      .node polygon,
+      .cluster rect {
+        transition: opacity 0.4s ease;
+      }
+    }
+
+    @keyframes #{$_B_DOCS}-edge-flow {
+      to {
+        stroke-dashoffset: to-rem($space-xl);
+      }
+    }
+
+    // Readability surface for source/text payloads — the "ts files need a
+    // background" contract: theme-aware --bg-secondary on --text-primary.
+    .docs-code {
+      font-family: var(--font-mono);
+      font-size: to-rem($space-lg);
+      line-height: 1.5;
+      padding: to-rem($space-md);
+      overflow: auto;
+      white-space: pre;
+      tab-size: 2;
+      color: var(--text-primary);
+      background: var(--bg-secondary);
+      border: to-rem($space-3xs) solid color-mix(in srgb, currentColor 20%, transparent);
+      border-radius: var(--radius-2xs);
+    }
+  }
+}

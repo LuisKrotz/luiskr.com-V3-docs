@@ -1,0 +1,43 @@
+// ════════════════════════════════════════════════════════════════════════════
+//  docs/_viewer.scss — the file viewer — translucent reading surface over the 3D scene.
+//  Imported by docs.scss (manifest) — not compiled standalone.
+// ════════════════════════════════════════════════════════════════════════════
+
+.#{$_B_DOCS} {
+  // ── File viewer — translucent reading surface over the scene ─────────
+  &-viewer {
+    pointer-events: auto;
+    margin-bottom: to-rem($space-lg);
+    padding: to-rem($space-md);
+    background: color-mix(in srgb, var(--bg-primary) 93%, transparent);
+    -webkit-backdrop-filter: blur(to-rem($space-xs));
+    backdrop-filter: blur(to-rem($space-xs));
+    border-radius: var(--radius-md);
+  }
+
+  &-viewer-head {
+    display: flex;
+    align-items: center;
+    gap: to-rem($space-sm);
+    margin-bottom: to-rem($space-sm);
+  }
+
+  &-viewer-back {
+    background: none;
+    border: to-rem($space-3xs) solid currentColor;
+    border-radius: var(--radius-2xs);
+    color: inherit;
+    font: inherit;
+    font-size: to-rem($space-lg);
+    padding: to-rem($space-2xs) to-rem($space-md);
+    cursor: pointer;
+    min-height: to-rem($space-2xl);
+  }
+
+  &-viewer-path {
+    font-family: var(--font-mono);
+    font-size: to-rem($space-lg);
+    opacity: 0.7;
+    word-break: break-all;
+  }
+}

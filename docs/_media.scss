@@ -1,0 +1,25 @@
+// ════════════════════════════════════════════════════════════════════════════
+//  docs/_media.scss — responsive + print media — mobile backdrop-filter drop (GPU cost) and print exfiltration guard.
+//  Imported by docs.scss (manifest) — not compiled standalone.
+// ════════════════════════════════════════════════════════════════════════════
+
+// Mobile GPUs: backdrop blur is expensive — surfaces keep their
+// near-opaque translucent bg and drop only the filter (app.scss contract).
+@media (max-width: $bk-768) {
+  .#{$_B_DOCS}-header,
+  .#{$_B_DOCS}-crumbs,
+  .#{$_B_DOCS}-nav,
+  .#{$_B_DOCS}-card,
+  .#{$_B_DOCS}-viewer {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+// Print-screen / print exfiltration: the protected region never prints.
+@media print {
+  .#{$_B_DOCS}-protected,
+  .#{$_B_DOCS}-viewer {
+    display: none;
+  }
+}
