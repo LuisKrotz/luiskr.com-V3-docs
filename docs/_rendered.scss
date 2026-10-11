@@ -342,6 +342,30 @@
       .cluster rect {
         transition: opacity 0.4s ease;
       }
+
+      // In-place skeleton while the mermaid chunk + render run — keeps
+      // the block's surface and reads as work-in-progress, not a code
+      // dump. The shimmer sweeps on the same slow cadence as edge-flow.
+      .docs-mermaid-loading {
+        @extend .txt-xs;
+
+        position: relative;
+        overflow: hidden;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        opacity: 0.55;
+        padding: to-rem($space-xl) to-rem($space-md);
+
+        &::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(115deg, transparent 30%, currentColor 48%, transparent 62%);
+          background-size: 300% 300%;
+          opacity: 0.08;
+          animation: #{$_B_DOCS}-drift 2.4s linear infinite;
+        }
+      }
     }
 
     @keyframes #{$_B_DOCS}-edge-flow {

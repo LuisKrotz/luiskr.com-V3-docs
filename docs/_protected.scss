@@ -9,6 +9,11 @@
     display: none;
   }
 
+  // The caption chip is meaningless without a live scene behind it.
+  &-scene-off + &-scene-hint {
+    display: none;
+  }
+
   // ── Copy protection surface ───────────────────────────────────────────
   &-protected {
     user-select: none;

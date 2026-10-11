@@ -247,7 +247,42 @@ export const mountArchScene = (
 
   const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 400)
 
-  camera.position.set(0, 26, 60)
+  // The manifest buckets hang off a synthetic center node — the portal
+  // root level IS the tree root, so the scene reads as one rooted graph
+  // (center = "In-depth project docs", ring 1 = the four buckets, …).
+  // Buckets are { root, label, children } — mapped to dir nodes here so
+  // they carry a real path (pickable + highlightable) and a real label.
+  const placed = layoutNodes([
+    {
+      type: 'dir',
+      name: DOCS_STRINGS.TITLE,
+      path: CHAR_STRINGS.EMPTY,
+      children: roots.map((r) => ({
+        type: 'dir' as const,
+        name: r.label,
+        path: r.root,
+        children: r.children,
+      })),
+    },
+  ])
+
+  // Fit the camera to the real graph radius — a deep manifest (outer
+  // rings past ~60 units) left the default pose sitting INSIDE the tree,
+  // which rendered nodes as giant blobs instead of a legible radial
+  // map. dist = r/sin(fov/2) with ~20% margin frames the whole graph.
+  const maxDepth = placed.reduce((m, p) => Math.max(m, p.depth), 0)
+
+  const graphR = DOCS_UNITS.SCENE_BASE_RADIUS + maxDepth * DOCS_UNITS.SCENE_DEPTH_STEP
+
+  const camDist = graphR * DOCS_UNITS.SCENE_CAMERA_FIT
+
+  camera.position.set(0, camDist * DOCS_UNITS.SCENE_CAMERA_LIFT, camDist)
+
+  // The far plane must clear the opposite rim of the graph at this
+  // distance — the constructor's 400-unit cap clips deep manifests.
+  camera.far = camDist + graphR * 3
+
+  camera.updateProjectionMatrix()
 
   const controls = new OrbitControls(camera, canvas)
 
@@ -314,25 +349,6 @@ export const mountArchScene = (
   const inkColor = new THREE.Color(ink)
 
   scene.add(new THREE.AmbientLight(0xffffff, 1))
-
-  // The manifest buckets hang off a synthetic center node — the portal
-  // root level IS the tree root, so the scene reads as one rooted graph
-  // (center = "In-depth project docs", ring 1 = the four buckets, …).
-  // Buckets are { root, label, children } — mapped to dir nodes here so
-  // they carry a real path (pickable + highlightable) and a real label.
-  const placed = layoutNodes([
-    {
-      type: 'dir',
-      name: DOCS_STRINGS.TITLE,
-      path: CHAR_STRINGS.EMPTY,
-      children: roots.map((r) => ({
-        type: 'dir' as const,
-        name: r.label,
-        path: r.root,
-        children: r.children,
-      })),
-    },
-  ])
 
   const pickables: THREE.Mesh[] = []
 
@@ -405,7 +421,11 @@ export const mountArchScene = (
 
       const isDir = node.type !== 'file'
 
-      const geo = new THREE.SphereGeometry(isDir ? 0.9 : 0.45, 12, 12)
+      const geo = new THREE.SphereGeometry(
+        isDir ? DOCS_UNITS.SCENE_DIR_RADIUS : DOCS_UNITS.SCENE_FILE_RADIUS,
+        12,
+        12
+      )
 
       const mat = new THREE.MeshBasicMaterial({
         color: inkColor,

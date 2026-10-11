@@ -13,7 +13,10 @@
  */
 
 import { DOCS_SELECTORS } from '@core/tokens/selectors/docs.js'
+import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
+import { DOCS_STRINGS } from '@core/tokens/strings/docs.js'
 import { THEME_CSS_PROPS } from '@core/tokens/css/theme.js'
+import { ARIA_ATTRS } from '@core/tokens/attrs/aria.js'
 import { devWarn } from '@core/devlog.js'
 
 /** Whether mermaid.initialize has already run — it is global config. */
@@ -59,6 +62,30 @@ export const renderMermaidBlocks = async (container: HTMLElement): Promise<void>
 
   if (!blocks.length) return
 
+  // Swap each block's raw diagram source for an in-place skeleton while
+  // the ~1MB mermaid chunk downloads and each diagram renders — the user
+  // sees "Rendering diagram…" instead of a code dump. On any failure the
+  // original source is restored so the file still reads as documentation.
+  const sources = blocks.map((b) => String(b.textContent))
+
+  const restore = (i: number) => {
+    blocks[i].textContent = sources[i]
+  }
+
+  blocks.forEach((block) => {
+    block.textContent = ''
+
+    const loader = document.createElement('div')
+
+    loader.className = DOCS_CLASSES.DOCS_MERMAID_LOADING
+
+    loader.setAttribute(ARIA_ATTRS.ROLE, ARIA_ATTRS.ROLE_STATUS)
+
+    loader.textContent = DOCS_STRINGS.MERMAID_LOADING
+
+    block.appendChild(loader)
+  })
+
   try {
     const mermaid = (await import('mermaid')).default
 
@@ -80,11 +107,11 @@ export const renderMermaidBlocks = async (container: HTMLElement): Promise<void>
     // diagram is rendered headlessly (`render` uses a detached temp node)
     // and the sanitized SVG is injected directly instead of relying on
     // mermaid.run's document-level post-processing.
-    for (const block of blocks) {
+    for (const [i, block] of blocks.entries()) {
       try {
         const { svg } = await mermaid.render(
           `${DOCS_SELECTORS.MERMAID.replace('.', '')}-${uid++}`,
-          String(block.textContent)
+          sources[i]
         )
 
         block.innerHTML = svg
@@ -92,11 +119,15 @@ export const renderMermaidBlocks = async (container: HTMLElement): Promise<void>
       } catch (err) {
         // A malformed diagram keeps its escaped source text — the file
         // still reads as documentation.
+        restore(i)
+
         devWarn('docs mermaid block failed', err)
       }
     }
   } catch (err) {
     // Import/initialize failure leaves every block as readable source.
+    blocks.forEach((_b, i) => restore(i))
+
     devWarn('docs mermaid render failed', err)
   }
 }

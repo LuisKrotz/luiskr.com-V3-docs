@@ -186,6 +186,12 @@ export const renderDocs = (view: ViewDocs) => {
         aria-label={DOCS_STRINGS.TREE_LABEL}
       />
 
+      {/* Scene caption — the backdrop reads as decoration without a
+          label; the chip states plainly that it is the interactive
+          architecture map. Hidden via the sibling scene-off rule when
+          the scene context is lost. */}
+      <div className={DOCS_CLASSES.DOCS_SCENE_HINT}>{DOCS_STRINGS.SCENE_HINT}</div>
+
       <header className={DOCS_CLASSES.DOCS_HEADER}>
         <h1
           className={DOCS_CLASSES.DOCS_TITLE}

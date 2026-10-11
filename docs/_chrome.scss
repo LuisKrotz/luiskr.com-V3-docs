@@ -47,6 +47,30 @@
     }
   }
 
+  // Scene caption — a faint fixed chip in the bottom gutter naming the
+  // backdrop ("architecture map") so first-time viewers know it is the
+  // interactive folder navigator, not decoration. pointer-events: none
+  // keeps the scene draggable under it.
+  &-scene-hint {
+    position: fixed;
+    right: to-rem($space-md);
+    bottom: to-rem($space-md);
+    // Above the z-index:1 content column — body sits later in DOM order
+    // and would paint over the chip's left half on file pages.
+    z-index: 2;
+    pointer-events: none;
+    padding: to-rem($space-3xs) to-rem($space-sm);
+    font-size: to-rem($space-md);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
+    -webkit-backdrop-filter: blur(to-rem($space-xs));
+    backdrop-filter: blur(to-rem($space-xs));
+    border: 1px solid color-mix(in srgb, var(--color-accent-contrast) 35%, transparent);
+    border-radius: var(--radius-md);
+    opacity: 0.75;
+  }
+
   // CSS fallback: soft drifting gradient band when WebGL is off.
   &-gl-fallback &-gl {
     background: linear-gradient(115deg, transparent 30%, currentColor 45%, transparent 60%);
