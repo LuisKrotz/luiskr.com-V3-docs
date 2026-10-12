@@ -45,8 +45,20 @@ describe('scanManifest', () => {
   test('builds roots for present dirs, skipping missing ones', () => {
     const manifest = scanManifest(tmpRoot)
 
-    expect(manifest.roots.map((r) => r.root)).toEqual(['docs', 'reports', 'src'])
+    // 'shared' resolves because the fixture's shared/ tree exists (its
+    // docs/ subtree is skipped). 'docs-exp' stays absent — experiments/docs
+    // contains only reports/, which SKIP_DIRS drops, leaving it empty.
+    expect(manifest.roots.map((r) => r.root)).toEqual(['docs', 'reports', 'src', 'shared'])
     expect(Date.parse(manifest.generated)).not.toBeNaN()
+  })
+
+  test('a root skip list excludes top-level dirs only', () => {
+    const shared = scanManifest(tmpRoot).roots.find((r) => r.root === 'shared')
+
+    // shared/docs is skipped under the 'shared' root (it publishes as the
+    // 'docs' root) while shared/src stays — the skip applies at top level.
+    expect(shared.children.map((n) => n.name)).not.toContain('docs')
+    expect(shared.children.map((n) => n.name)).toContain('src')
   })
 
   test('dirs sort before files; hidden + skip-dirs excluded; empty dirs dropped', () => {

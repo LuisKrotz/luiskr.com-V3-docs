@@ -59,4 +59,13 @@ describe('resolveFileId', () => {
     expect(resolveFileId(tmpRoot, 'docs:missing.md')).toBe(null)
     expect(resolveFileId(tmpRoot, 'docs:guides')).toBe(null)
   })
+
+  test('rejects ids under a root skip list even when the file exists', () => {
+    // shared/docs/README.md exists on disk but the 'shared' root skips
+    // 'docs' — the published tree owns it under the 'docs' root instead.
+    expect(resolveFileId(tmpRoot, 'shared:docs/README.md')).toBe(null)
+    expect(resolveFileId(tmpRoot, 'shared:src/main.ts')).toBe(
+      path.join(tmpRoot, 'shared', 'src', 'main.ts')
+    )
+  })
 })
