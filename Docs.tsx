@@ -513,9 +513,10 @@ export class ViewDocs extends BaseComponent {
     this._sceneHandle = null
     this._sceneCanvas = null
 
-    // The docs JSON-LD graph is page-scoped — drop it so a TechArticle
-    // never lingers on the route navigated to next.
-    updateJsonLd(null)
+    // The docs JSON-LD graph is page-scoped, but the nav pipeline emits
+    // the next route's graph BEFORE this element disconnects — clearing
+    // here would wipe the incoming route's head data, so the node is
+    // simply overwritten by syncDocumentHead on every navigation.
   }
 
   /**

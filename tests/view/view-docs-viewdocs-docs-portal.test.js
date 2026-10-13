@@ -951,7 +951,7 @@ describe('ViewDocs — docs portal', () => {
     expect(e.clipboardData.setData).not.toHaveBeenCalled()
   })
 
-  test('JSON-LD + title + microdata: CollectionPage at root, TechArticle on file open, cleared on destroy', async () => {
+  test('JSON-LD + title + microdata: CollectionPage at root, TechArticle on file open, graph survives destroy', async () => {
     const jsonLd = () => document.getElementById(SCHEMA_STRINGS.JSON_LD_SCRIPT_ID)
     const graph = () => JSON.parse(jsonLd().textContent)['@graph']
 
@@ -982,6 +982,9 @@ describe('ViewDocs — docs portal', () => {
     cleanup()
     cleanup = null
 
-    expect(jsonLd()).toBeNull()
+    // The nav pipeline emits the next route's graph BEFORE this view
+    // disconnects, so teardown intentionally no longer clears the node —
+    // destroying mid-graph must not wipe the incoming route's head data.
+    expect(jsonLd()).toBeTruthy()
   })
 })
