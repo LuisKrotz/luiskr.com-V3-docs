@@ -95,6 +95,7 @@ export const renderMermaidBlocks = async (container: HTMLElement): Promise<void>
       mermaid.initialize({
         startOnLoad: false,
         securityLevel: 'strict',
+        suppressErrorRendering: true,
         theme: 'base',
         themeVariables: themeVars(getComputedStyle(document.documentElement)),
       })
