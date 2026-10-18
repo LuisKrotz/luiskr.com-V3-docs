@@ -20,7 +20,9 @@
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { webglContext } from '@core/utils/canvas/webgl-mode.js'
+import { webglAllowed, webglContext } from '@core/utils/canvas/webgl-mode.js'
+import { hasWebGpu } from '@core/utils/gpu/webgpu-widget.js'
+import { mountArchScene3d } from './arch-scene-3d.js'
 import { wasmPool } from '@core/utils/wasm/wasm-pool.js'
 import { WASM_ACTIONS } from '@core/tokens/data/wasm.js'
 import { CACHE_STORAGE_KEYS } from '@core/tokens/data/storage.js'
@@ -45,7 +47,7 @@ export interface ArchSceneHandle {
 }
 
 /** A flattened manifest node with its ring depth and ring angle. */
-interface PlacedNode {
+export interface PlacedNode {
   node: DocsNode
   depth: number
   angle: number
@@ -64,7 +66,7 @@ interface LabelRef {
  * the ring radius, sibling order spreads the angle. Recursive per the
  * self-similar-traversal rule.
  */
-const layoutNodes = (
+export const layoutNodes = (
   nodes: DocsNode[],
   depth = 0,
   from = 0,
@@ -121,7 +123,7 @@ const layoutPositionsJs = (depths: number[], angles: number[]): Float32Array => 
  * @param placed Flattened tree nodes.
  * @returns xyz triplets, or null when nothing resolved.
  */
-const computePositions = async (placed: PlacedNode[]): Promise<Float32Array> => {
+export const computePositions = async (placed: PlacedNode[]): Promise<Float32Array> => {
   const depths = placed.map((p) => p.depth)
   const angles = placed.map((p) => p.angle)
 
@@ -145,15 +147,21 @@ const computePositions = async (placed: PlacedNode[]): Promise<Float32Array> => 
  * @param name Folder name drawn on the label.
  * @param ink  Theme ink color resolved from the canvas' computed style.
  */
-const makeLabel = (
-  name: string,
-  ink: string
-): { sprite: THREE.Sprite; material: THREE.SpriteMaterial } | null => {
+/**
+ * Draws a dir-name label onto a fresh 2d canvas — shared by the
+ * three.js sprite arm (CanvasTexture) and the scene3d arm
+ * (createImageBitmap → texture upload). Returns null when 2d canvas
+ * is unavailable (happy-dom, exotic runtimes) so the scene still
+ * mounts label-free.
+ * @param name Folder name drawn on the label.
+ * @param ink  Theme ink color resolved from the canvas' computed style.
+ */
+export const makeLabelCanvas = (name: string, ink: string): HTMLCanvasElement | null => {
   const cnv = document.createElement(HTML_TAGS.CANVAS)
 
   const ctx = cnv.getContext('2d') as CanvasRenderingContext2D | null
 
-  if (!ctx || !THREE.CanvasTexture || !THREE.Sprite) return null
+  if (!ctx) return null
 
   cnv.width = DOCS_UNITS.LABEL_W
   cnv.height = DOCS_UNITS.LABEL_H
@@ -163,6 +171,19 @@ const makeLabel = (
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillText(name, DOCS_UNITS.LABEL_W / 2, DOCS_UNITS.LABEL_H / 2, DOCS_UNITS.LABEL_W - 8)
+
+  return cnv
+}
+
+const makeLabel = (
+  name: string,
+  ink: string
+): { sprite: THREE.Sprite; material: THREE.SpriteMaterial } | null => {
+  if (!THREE.CanvasTexture || !THREE.Sprite) return null
+
+  const cnv = makeLabelCanvas(name, ink)
+
+  if (!cnv) return null
 
   const material = new THREE.SpriteMaterial({
     map: new THREE.CanvasTexture(cnv),
@@ -179,7 +200,7 @@ const makeLabel = (
 }
 
 /** Persisted camera pose + rotation-off flag across scene remounts. */
-interface SceneCamState {
+export interface SceneCamState {
   /** camera.position xyz */
   p: [number, number, number]
   /** controls.target xyz */
@@ -192,7 +213,7 @@ interface SceneCamState {
  * Reads the session-persisted camera pose — null when storage is
  * unavailable (tests, privacy mode) or the payload is malformed.
  */
-const readCamState = (): SceneCamState | null => {
+export const readCamState = (): SceneCamState | null => {
   try {
     if (typeof sessionStorage === TYPE_STRINGS.UNDEFINED) return null
 
@@ -220,7 +241,74 @@ const readCamState = (): SceneCamState | null => {
  *                 working without WebGL.
  * @returns Scene handle, or null when WebGL is unavailable.
  */
-export const mountArchScene = (
+/**
+ * The manifest buckets hang off a synthetic center node — the portal
+ * root level IS the tree root, so the scene reads as one rooted graph
+ * (center = "In-depth project docs", ring 1 = the four buckets, …).
+ * Buckets are { root, label, children } — mapped to dir nodes here so
+ * they carry a real path (pickable + highlightable) and a real label.
+ * Shared by the three.js and scene3d arms.
+ * @param roots Manifest root buckets.
+ * @returns The flattened placed tree.
+ */
+export const placeRoots = (
+  roots: Array<{ root: string; label: string; children: DocsNode[] }>
+): PlacedNode[] =>
+  layoutNodes([
+    {
+      type: 'dir',
+      name: DOCS_STRINGS.TITLE,
+      path: CHAR_STRINGS.EMPTY,
+      children: roots.map((r) => ({
+        type: 'dir' as const,
+        name: r.label,
+        path: r.root,
+        children: r.children,
+      })),
+    },
+  ])
+
+/** Camera-fit numbers for a placed tree — shared by both arms. */
+export interface GraphFit {
+  /** Outer ring radius of the deepest node. */
+  graphR: number
+  /** Eye distance that frames the whole graph with ~20% margin. */
+  camDist: number
+  /** Far plane — clears the opposite rim at this distance. */
+  far: number
+}
+
+/**
+ * Fit the camera to the real graph radius — a deep manifest (outer
+ * rings past ~60 units) left the default pose sitting INSIDE the tree,
+ * which rendered nodes as giant blobs instead of a legible radial
+ * map. dist = r/sin(fov/2) with ~20% margin frames the whole graph.
+ * @param placed The flattened placed tree.
+ */
+export const graphFit = (placed: readonly PlacedNode[]): GraphFit => {
+  const maxDepth = placed.reduce((m, p) => Math.max(m, p.depth), 0)
+
+  const graphR = DOCS_UNITS.SCENE_BASE_RADIUS + maxDepth * DOCS_UNITS.SCENE_DEPTH_STEP
+
+  const camDist = graphR * DOCS_UNITS.SCENE_CAMERA_FIT
+
+  // The far plane must clear the opposite rim of the graph at this
+  // distance — the constructor's 400-unit cap clips deep manifests.
+  return { graphR, camDist, far: camDist + graphR * 3 }
+}
+
+/**
+ * The three.js/WebGL arm of the architecture scene — the original
+ * renderer, kept as the synchronous fallback for every device without
+ * WebGPU (and the `?debug=webGLMode:fallback` probe). Returns null when
+ * no GL context can be acquired; the composite then reports `onLost`.
+ * @param canvas   Target canvas.
+ * @param roots    Manifest root buckets.
+ * @param onPick   Called with the manifest path on a node pick.
+ * @param onLost   Called when the WebGL context is lost mid-flight.
+ * @returns The scene handle, or null when no GL context exists.
+ */
+export const mountArchSceneThree = (
   canvas: HTMLCanvasElement,
   roots: Array<{ root: string; label: string; children: DocsNode[] }>,
   onPick: (_path: string) => void,
@@ -247,40 +335,13 @@ export const mountArchScene = (
 
   const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 400)
 
-  // The manifest buckets hang off a synthetic center node — the portal
-  // root level IS the tree root, so the scene reads as one rooted graph
-  // (center = "In-depth project docs", ring 1 = the four buckets, …).
-  // Buckets are { root, label, children } — mapped to dir nodes here so
-  // they carry a real path (pickable + highlightable) and a real label.
-  const placed = layoutNodes([
-    {
-      type: 'dir',
-      name: DOCS_STRINGS.TITLE,
-      path: CHAR_STRINGS.EMPTY,
-      children: roots.map((r) => ({
-        type: 'dir' as const,
-        name: r.label,
-        path: r.root,
-        children: r.children,
-      })),
-    },
-  ])
+  const placed = placeRoots(roots)
 
-  // Fit the camera to the real graph radius — a deep manifest (outer
-  // rings past ~60 units) left the default pose sitting INSIDE the tree,
-  // which rendered nodes as giant blobs instead of a legible radial
-  // map. dist = r/sin(fov/2) with ~20% margin frames the whole graph.
-  const maxDepth = placed.reduce((m, p) => Math.max(m, p.depth), 0)
-
-  const graphR = DOCS_UNITS.SCENE_BASE_RADIUS + maxDepth * DOCS_UNITS.SCENE_DEPTH_STEP
-
-  const camDist = graphR * DOCS_UNITS.SCENE_CAMERA_FIT
+  const { camDist, far } = graphFit(placed)
 
   camera.position.set(0, camDist * DOCS_UNITS.SCENE_CAMERA_LIFT, camDist)
 
-  // The far plane must clear the opposite rim of the graph at this
-  // distance — the constructor's 400-unit cap clips deep manifests.
-  camera.far = camDist + graphR * 3
+  camera.far = far
 
   camera.updateProjectionMatrix()
 
@@ -657,6 +718,77 @@ export const mountArchScene = (
       lineGeo?.dispose()
 
       renderer.dispose()
+    },
+  }
+}
+
+/**
+ * Dual-path mount — the scene3d (rust/WebGPU) engine takes the scene
+ * on capable hardware and the three.js arm remains the fallback for
+ * every other device, exactly like the widget migrations. Capability
+ * order: no `webglAllowed()` (explicit debug fallback / GL block) or
+ * no `navigator.gpu` → straight to the three path, which keeps its
+ * synchronous null contract. With WebGPU present the wasm arm mounts
+ * async; any failure resolves into the three arm inside the same
+ * handle (or `onLost` when GL is also absent).
+ * @param canvas   Target canvas.
+ * @param roots    Manifest root buckets.
+ * @param onPick   Called with the manifest path on a node pick.
+ * @param onLost   Called once when no GPU path can mount — the host
+ *                 hides the section (the three arm's own null return
+ *                 already covered the no-WebGPU case).
+ * @returns Scene handle, or null only when the synchronous three
+ *          probe fails outright.
+ */
+export const mountArchScene = (
+  canvas: HTMLCanvasElement,
+  roots: Array<{ root: string; label: string; children: DocsNode[] }>,
+  onPick: (_path: string) => void,
+  onLost?: () => void
+): ArchSceneHandle | null => {
+  if (!webglAllowed() || !hasWebGpu()) {
+    return mountArchSceneThree(canvas, roots, onPick, onLost)
+  }
+
+  /** Whichever arm is live — filled when the wasm mount resolves. */
+  let inner: ArchSceneHandle | null = null
+
+  /** setActive called before the arm resolves — replayed on mount. */
+  let pendingPath: string = CHAR_STRINGS.EMPTY
+
+  /** Teardown while the async mount is in flight. */
+  let disposed = false
+
+  void mountArchScene3d(canvas, roots, onPick).then((h) => {
+    if (disposed) {
+      h?.destroy()
+
+      return
+    }
+
+    inner = h ?? mountArchSceneThree(canvas, roots, onPick, onLost)
+
+    if (!inner) {
+      // No WebGPU artifact AND no WebGL — the host hides the section.
+      onLost?.()
+
+      return
+    }
+
+    inner.setActive(pendingPath)
+  })
+
+  return {
+    setActive(path: string) {
+      pendingPath = path
+
+      inner?.setActive(path)
+    },
+
+    destroy() {
+      disposed = true
+
+      inner?.destroy()
     },
   }
 }
