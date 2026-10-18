@@ -52,4 +52,29 @@ describe('docs mermaid', () => {
 
     expect(box.textContent).toContain('bad syntax')
   })
+
+  test('unparsable computed font falls back to engine defaults', async () => {
+    const box = document.createElement('div')
+
+    box.innerHTML = `<div class="${DOCS_CLASSES.DOCS_MERMAID}">flowchart TB</div>`
+
+    const realGetComputedStyle = window.getComputedStyle
+
+    window.getComputedStyle = () => ({
+      getPropertyValue: () => ' ',
+      fontFamily: '',
+      fontSize: 'bogus',
+    })
+
+    try {
+      await renderMermaidBlocks(box)
+    } finally {
+      window.getComputedStyle = realGetComputedStyle
+    }
+
+    const theme = JSON.parse(__diagramState.lastTheme)
+
+    expect(theme.font).toBe('sans-serif')
+    expect(theme.fontSize).toBe(14)
+  })
 })
