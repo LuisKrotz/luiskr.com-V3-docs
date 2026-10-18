@@ -235,10 +235,10 @@ describe('ViewDocs — docs portal', () => {
     expect(pushed.length).toBe(0)
   })
 
-  test('mermaid blocks render through the mermaid module', async () => {
-    const { __mermaidState } = await import('mermaid')
+  test('mermaid blocks render through the diagram engine', async () => {
+    const { __diagramState } = await import('@core/utils/wasm/wasm-diagram.js')
 
-    __mermaidState.ranNodes = 0
+    __diagramState.calls = 0
 
     globalThis.fetch = jest.fn(async () => ({
       ok: true,
@@ -253,7 +253,7 @@ describe('ViewDocs — docs portal', () => {
     const block = view.shadowRoot.querySelector(DOCS_SELECTORS.MERMAID)
 
     expect(block.getAttribute('data-processed')).toBe('true')
-    expect(__mermaidState.ranNodes).toBeGreaterThan(0)
+    expect(__diagramState.calls).toBeGreaterThan(0)
   })
 
   test('coverage reports get istanbul keyboard nav on document keydown', async () => {

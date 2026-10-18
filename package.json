@@ -21,7 +21,6 @@
   },
   "dependencies": {
     "@luiskr/core": "1.0.0",
-    "mermaid": "12.0.0",
     "three": "0.184.0"
   },
   "devDependencies": {
