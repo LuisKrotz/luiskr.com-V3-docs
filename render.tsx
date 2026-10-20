@@ -168,6 +168,7 @@ const crumbBar = (view: ViewDocs) => {
         aria-label={DOCS_STRINGS.CRUMB_INPUT_LABEL}
         title={DOCS_STRINGS.CRUMB_INPUT_HINT}
         placeholder={DOCS_STRINGS.CRUMB_PLACEHOLDER}
+        name={DOCS_STRINGS.CRUMB_INPUT_NAME}
         value={`${CHAR_STRINGS.SLASH}${view.docsPath}`}
         onKeydown={(e: Event) => view.onCrumbKey(e as KeyboardEvent)}
         onFocus={(e: Event) => (e.target as HTMLInputElement).select()}
