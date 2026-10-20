@@ -20,6 +20,8 @@
     border-radius: var(--radius-md);
     color: inherit;
     font: inherit;
+    // Cards are <a href> (crawlable docs routes) — read as buttons did.
+    text-decoration: none;
     cursor: pointer;
     display: flex;
     flex-direction: column;

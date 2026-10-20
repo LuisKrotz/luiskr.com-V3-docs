@@ -31,7 +31,13 @@ const FONT_SIZE_FALLBACK = 14
  * Reads the live theme custom properties + computed type into the
  * engine's theme JSON — the diagram inherits the project's
  * ink/surface/accent tokens instead of shipping a palette.
- * @param style Computed style of the docs root (carries the theme vars).
+ *
+ * The style is sampled from a mermaid block inside the docs shadow
+ * root, NOT documentElement: the docs page never sets a font on `html`,
+ * so the root's computed `fontFamily` is the UA default (serif) while
+ * the block inherits `.docs`'s `var(--font-primary)` and the rendered
+ * content's real size.
+ * @param style Computed style of a `.docs-mermaid` block.
  * @returns JSON string for `render_diagram`'s `Theme::from_json`.
  */
 const themeJson = (style: CSSStyleDeclaration): string => {
@@ -86,7 +92,7 @@ export const renderMermaidBlocks = async (container: HTMLElement): Promise<void>
     block.appendChild(loader)
   })
 
-  const theme = themeJson(getComputedStyle(document.documentElement))
+  const theme = themeJson(getComputedStyle(blocks[0]))
 
   // Per-block render — the engine returns one `<svg>` string per source;
   // it lands via innerHTML exactly where mermaid's output used to.

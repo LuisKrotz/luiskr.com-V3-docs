@@ -119,6 +119,8 @@
     color: inherit;
     font: inherit;
     text-align: left;
+    // Rows are <a href> (crawlable docs routes) — read as buttons did.
+    text-decoration: none;
     // ≥34px row + side padding — a comfortable tap target on touch.
     padding: to-rem($space-sm) to-rem($space-2xs);
     width: 100%;

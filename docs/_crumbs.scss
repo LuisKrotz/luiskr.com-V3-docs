@@ -25,6 +25,8 @@
     border: 0;
     color: inherit;
     font: inherit;
+    // Crumbs are <a href> (crawlable docs routes) — read as buttons did.
+    text-decoration: none;
     cursor: pointer;
     padding: to-rem($space-2xs) to-rem($space-2xs);
     opacity: 0.75;

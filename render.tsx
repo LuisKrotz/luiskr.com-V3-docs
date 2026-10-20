@@ -13,19 +13,52 @@ import { FORM_ATTRS } from '@core/tokens/attrs/form.js'
 import { MICRODATA_ATTRS, MICRODATA_VALUES } from '@core/tokens/attrs/microdata.js'
 import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
 import { DOCS_IDS } from '@core/tokens/ids/docs.js'
+import { ROUTE_PATHS } from '@core/tokens/routes/paths.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 import { DOCS_STRINGS } from '@core/tokens/strings/docs.js'
 import { h } from '@core/jsx.js'
+import { isPlainClick } from '@core/utils/dom.js'
 import { folderSvg } from './folder-svg.js'
 import { crumbsForPath } from './manifest.js'
 import type { ViewDocs } from './Docs.js'
 import type { DocsNode } from './manifest.js'
 
 /**
- * Recursive tree rows — each node renders a <li> with a button (dirs
- * toggle open AND navigate; files navigate). Children render inside a
- * nested <ul> only while the dir is in the host's open-set — per the
- * self-similar recursion rule the tree walks itself.
+ * Absolute `/docs` route for a manifest-relative path — the canonical URL
+ * every navigation surface (tree rows, grid cards, crumbs) carries as a
+ * real href so crawlers, reader mode, and new-tab gestures all resolve.
+ * @param subPath Manifest-relative path ('' → portal root).
+ * @returns The portal-relative URL.
+ */
+const docsHref = (subPath: string): string =>
+  subPath ? `${ROUTE_PATHS.DOCS}${CHAR_STRINGS.SLASH}${subPath}` : ROUTE_PATHS.DOCS
+
+/**
+ * The URL a tree-row click actually lands on: an expanded dir the viewer
+ * sits inside collapses UP one level, so its href mirrors the parent —
+ * every other row maps to its own canonical /docs/<path>.
+ * @param view The host docs view (reads docsPath for the inside check).
+ * @param node The manifest node the row renders.
+ * @param open Whether the dir row is currently expanded.
+ * @returns The destination URL for the row's href.
+ */
+const treeHref = (view: ViewDocs, node: DocsNode, open: boolean): string => {
+  const inside =
+    view.docsPath === node.path || view.docsPath.startsWith(`${node.path}${CHAR_STRINGS.SLASH}`)
+
+  if (open && inside)
+    return docsHref(node.path.split(CHAR_STRINGS.SLASH).slice(0, -1).join(CHAR_STRINGS.SLASH))
+
+  return docsHref(node.path)
+}
+
+/**
+ * Recursive tree rows — each node renders a <li> with an anchor (dirs
+ * toggle open AND navigate; files navigate). Real hrefs keep the tree
+ * crawlable and give right-click/new-tab native semantics; plain clicks
+ * stay on the SPA router. Children render inside a nested <ul> only
+ * while the dir is in the host's open-set — per the self-similar
+ * recursion rule the tree walks itself.
  */
 const treeNodes = (view: ViewDocs, nodes: DocsNode[]): HTMLElement[] =>
   nodes.map((node) => {
@@ -37,21 +70,24 @@ const treeNodes = (view: ViewDocs, nodes: DocsNode[]): HTMLElement[] =>
 
     return (
       <li key={node.path} role={ARIA_ATTRS.ROLE_NONE}>
-        <button
-          type={FORM_ATTRS.TYPE_BUTTON}
+        <a
           role={ARIA_ATTRS.ROLE_TREEITEM}
+          href={treeHref(view, node, open)}
           className={`${DOCS_CLASSES.DOCS_TREE_ITEM}${open ? ` ${DOCS_CLASSES.DOCS_TREE_OPEN}` : CHAR_STRINGS.EMPTY}`}
           aria-expanded={isDir ? String(open) : undefined}
           aria-current={active ? 'page' : undefined}
           {...{ [DATA_ATTRS.DATA_PATH]: node.path }}
           onClick={(e: Event) => {
+            // Modified/middle clicks keep native anchor semantics (new tab).
+            if (!isPlainClick(e)) return
+
             e.preventDefault()
 
             view.pickTreeNode(node)
           }}
         >
           {node.name}
-        </button>
+        </a>
         {isDir && open && node.children?.length ? (
           <ul role={ARIA_ATTRS.ROLE_GROUP}>{treeNodes(view, node.children)}</ul>
         ) : null}
@@ -61,23 +97,30 @@ const treeNodes = (view: ViewDocs, nodes: DocsNode[]): HTMLElement[] =>
 
 /**
  * Grid cards — dirs and files get the generated folder SVG and navigate
- * into/open the node on click.
+ * into/open the node on click. Rendered as real anchors so the folder
+ * grid is crawlable and new-tab gestures work natively.
  */
 const gridCards = (view: ViewDocs, nodes: DocsNode[]): HTMLElement[] =>
   nodes.map((node) => {
     const isDir = node.type === 'dir'
 
     return (
-      <button
+      <a
         key={node.path}
-        type={FORM_ATTRS.TYPE_BUTTON}
+        href={docsHref(node.path)}
         className={DOCS_CLASSES.DOCS_CARD}
         {...{ [DATA_ATTRS.DATA_PATH]: node.path }}
-        onClick={() => view.pickNode(node)}
+        onClick={(e: Event) => {
+          if (!isPlainClick(e)) return
+
+          e.preventDefault()
+
+          view.pickNode(node)
+        }}
       >
         <span className={DOCS_CLASSES.DOCS_CARD_ART}>{folderSvg(node.name, isDir)}</span>
         <span className={DOCS_CLASSES.DOCS_CARD_LABEL}>{node.name}</span>
-      </button>
+      </a>
     )
   }) as HTMLElement[]
 
@@ -91,22 +134,34 @@ const crumbBar = (view: ViewDocs) => {
 
   return (
     <nav className={DOCS_CLASSES.DOCS_CRUMBS} aria-label={DOCS_STRINGS.TITLE}>
-      <button
-        type={FORM_ATTRS.TYPE_BUTTON}
+      <a
+        href={docsHref(CHAR_STRINGS.EMPTY)}
         className={DOCS_CLASSES.DOCS_CRUMB}
-        onClick={() => view.navigateDocs(CHAR_STRINGS.EMPTY)}
+        onClick={(e: Event) => {
+          if (!isPlainClick(e)) return
+
+          e.preventDefault()
+
+          view.navigateDocs(CHAR_STRINGS.EMPTY)
+        }}
       >
         {DOCS_STRINGS.TITLE}
-      </button>
+      </a>
       {crumbs.map((c) => (
-        <button
+        <a
           key={c.path}
-          type={FORM_ATTRS.TYPE_BUTTON}
+          href={docsHref(c.path)}
           className={DOCS_CLASSES.DOCS_CRUMB}
-          onClick={() => view.navigateDocs(c.path)}
+          onClick={(e: Event) => {
+            if (!isPlainClick(e)) return
+
+            e.preventDefault()
+
+            view.navigateDocs(c.path)
+          }}
         >
           {c.label}
-        </button>
+        </a>
       ))}
       <input
         className={DOCS_CLASSES.DOCS_CRUMB_EDIT}

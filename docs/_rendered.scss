@@ -112,16 +112,184 @@
     }
 
     // Sanitized html reports (istanbul coverage, generated docs): their
-    // body/html selectors are remapped onto this wrapper at render time,
-    // so it must supply the light paper surface those rules assume —
-    // otherwise the report's dark text lands on the dark portal.
+    // body/html selectors are remapped onto this wrapper at render time and
+    // their `!important`s stripped, so the themed overrides below fully own
+    // the report surface — it follows the app's light/dark toggle through
+    // the --cov-* tokens instead of the report's baked light hexes.
     .docs-html {
       max-width: none;
       padding: to-rem($space-md);
-      background: var(--color-white-raw);
+      background: var(--bg-secondary);
       border-radius: var(--radius-md);
-      color-scheme: light;
+      color: var(--text-primary);
       overflow: auto;
+
+      // Report chrome — ink, links, quiet text and the fraction chips.
+      a {
+        color: var(--cov-link);
+      }
+
+      div.path a:link,
+      div.path a:visited {
+        color: var(--text-primary);
+      }
+
+      .quiet {
+        color: var(--text-secondary);
+      }
+
+      .fraction {
+        background: var(--cov-fraction-bg);
+        color: var(--cov-fraction-ink);
+      }
+
+      .coverage-summary td.empty {
+        color: var(--text-muted);
+      }
+
+      // Table/grid borders — istanbul's #bbb/#ddd hairlines.
+      .coverage-summary tbody,
+      .coverage-summary td,
+      .coverage-summary tr,
+      .keyline-all {
+        border-color: var(--cov-border);
+      }
+
+      // Status fills — soft tints on rows, mid fills on stat cells,
+      // strong swatches on the status bar/chart borders.
+      .status-line.low,
+      .low .cover-fill {
+        background: var(--cov-low-strong);
+      }
+
+      .low .chart {
+        border-color: var(--cov-low-strong);
+      }
+
+      .highlighted,
+      .highlighted .cstat-no,
+      .highlighted .fstat-no,
+      .highlighted .cbranch-no {
+        background: var(--cov-low-strong);
+      }
+
+      .cstat-no,
+      .fstat-no {
+        background: var(--cov-low-mid);
+      }
+
+      .low,
+      .cline-no {
+        background: var(--cov-low-soft);
+      }
+
+      .high,
+      .cline-yes {
+        background: var(--cov-high-soft);
+      }
+
+      .cstat-yes {
+        background: var(--cov-high-mid);
+      }
+
+      .status-line.high,
+      .high .cover-fill {
+        background: var(--cov-high-strong);
+      }
+
+      .high .chart {
+        border-color: var(--cov-high-strong);
+      }
+
+      .status-line.medium,
+      .medium .cover-fill {
+        background: var(--cov-med-strong);
+      }
+
+      .medium .chart {
+        border-color: var(--cov-med-strong);
+      }
+
+      .medium {
+        background: var(--cov-med-soft);
+      }
+
+      .cbranch-no {
+        background: var(--cov-warn);
+        color: var(--text-primary);
+      }
+
+      .cstat-skip,
+      .fstat-skip,
+      .cbranch-skip {
+        background: var(--cov-skip);
+        color: var(--text-primary);
+      }
+
+      .cline-neutral {
+        background: var(--cov-neutral);
+      }
+
+      .missing-if-branch {
+        background: var(--cov-missing-bg);
+        color: var(--cov-missing-ink);
+      }
+
+      // The uncovered-region marker keeps its dark slab + yellow ink in
+      // both themes — the strongest possible "needs attention" signal.
+      .cover-empty {
+        background: var(--bg-primary);
+      }
+
+      // Source-line zebra stripes (prettify's even-line marker).
+      li.L1,
+      li.L3,
+      li.L5,
+      li.L7,
+      li.L9 {
+        background: var(--cov-stripe);
+      }
+
+      // Prettify syntax inks — the inlined stylesheet ships light-only
+      // colors; the --cov-syn-* tokens keep them legible in both themes.
+      .pln {
+        color: var(--text-primary);
+      }
+
+      .str,
+      .atv {
+        color: var(--cov-syn-str);
+      }
+
+      .kwd,
+      .tag {
+        color: var(--cov-syn-kwd);
+      }
+
+      .com {
+        color: var(--cov-syn-com);
+      }
+
+      .typ,
+      .atn,
+      .dec,
+      .var {
+        color: var(--cov-syn-typ);
+      }
+
+      .lit {
+        color: var(--cov-syn-lit);
+      }
+
+      .pun,
+      .opn,
+      .clo {
+        color: var(--cov-syn-pun);
+      }
+
+      .fun {
+        color: var(--cov-syn-fun);
+      }
 
       // Istanbul report regions are min-content wide (the 5-metric
       // summary table ~840px, code <pre> wider): give each its own
@@ -141,13 +309,38 @@
         overflow-wrap: anywhere;
       }
 
-      // Mobile: the istanbul .pad1 chrome + our own padding both shrink so
-      // the report's readable area keeps most of a narrow viewport.
+      // Mobile: the istanbul .pad1/.pad2/.padN-space chrome + our own
+      // padding shrink so the report's readable area keeps most of a
+      // narrow viewport; nowrap cells release so paths wrap instead of
+      // forcing a second scroll axis on the summary table.
       @media (max-width: $bk-768) {
         padding: to-rem($space-2xs);
 
-        .pad1 {
+        .pad1,
+        .pad2 {
           padding: to-rem($space-2xs);
+        }
+
+        .pad2x {
+          padding-right: to-rem($space-2xs);
+          padding-left: to-rem($space-2xs);
+        }
+
+        .space-left2 {
+          padding-left: to-rem($space-md);
+        }
+
+        .space-right2 {
+          padding-right: to-rem($space-2xs);
+        }
+
+        table.coverage td.line-count {
+          padding-right: to-rem($space-2xs);
+          padding-left: to-rem($space-sm);
+        }
+
+        table.coverage-summary td.file {
+          white-space: normal;
         }
       }
     }
@@ -324,9 +517,11 @@
       overflow-x: auto;
       text-align: center;
 
+      // No max-width scaling — the block's overflow-x:auto scrolls wide
+      // diagrams instead of shrinking them (scaled-down diagrams render
+      // unreadably small text).
       svg {
-        max-width: 100%;
-        height: auto;
+        display: inline-block;
       }
 
       .edgePath path,

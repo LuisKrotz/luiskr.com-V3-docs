@@ -28,6 +28,7 @@ import store from '@core/store.js'
 import { componentText } from '@core/locale/ui-text.js'
 import { devWarn } from '@core/devlog.js'
 import { generateDocsSchema, updateJsonLd } from '@core/utils/schema.js'
+import { isPlainClick } from '@core/utils/dom.js'
 import { BASE_TITLE } from '@core/tokens/routes.js'
 import router from '@core/router/router.js'
 import type { RouteDescriptor } from '@core/router/router.js'
@@ -222,7 +223,9 @@ export class ViewDocs extends BaseComponent {
   /**
    * ARIA treeview keys on the nav: ↑/↓ move between visible rows, → opens
    * a closed dir (or descends into an open one), ← closes an open dir (or
-   * focuses the parent). Enter/Space stay native button activation.
+   * focuses the parent). The rows are anchors now — Enter activates
+   * natively, Space is routed to a click since anchors don't activate on
+   * Space like buttons do.
    */
   onTreeKey(e: KeyboardEvent): void {
     const btn = e.target as HTMLButtonElement
@@ -237,7 +240,13 @@ export class ViewDocs extends BaseComponent {
     // the cast documents that contract instead of a dead `|| ''` fallback.
     const path = btn.getAttribute(DATA_ATTRS.DATA_PATH) as string
 
-    if (e.key === KEYS.ARROW_DOWN) {
+    if (e.key === KEYS.SPACE) {
+      // Anchors don't fire on Space — reroute to the click handler so
+      // keyboard activation matches the old button semantics.
+      e.preventDefault()
+
+      btn.click()
+    } else if (e.key === KEYS.ARROW_DOWN) {
       e.preventDefault()
 
       items[idx + 1]?.focus()
@@ -659,6 +668,9 @@ export class ViewDocs extends BaseComponent {
     const docsPrefix = `${ROUTE_PATHS.DOCS}${CHAR_STRINGS.SLASH}`
 
     if (!url.pathname.startsWith(docsPrefix)) return
+
+    // Modified/middle clicks keep native anchor semantics (new tab).
+    if (!isPlainClick(e)) return
 
     e.preventDefault()
 
