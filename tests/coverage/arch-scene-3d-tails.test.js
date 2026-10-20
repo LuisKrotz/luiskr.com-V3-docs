@@ -251,6 +251,13 @@ describe('arch-scene-3d helpers', () => {
     expect(e.idx.length).toBe(24)
     expect(e.nrm.length).toBe(16 * 3)
     expect(e.uv.length).toBe(16 * 2)
+
+    // NaN positions survive the len guard (NaN < 1e-6 is false) and
+    // propagate into the cross products — `ql || 1` keeps the second
+    // perpendicular finite instead of producing NaN geometry.
+    const nan = buildEdges(placed.slice(0, 2), new Float32Array([0, 0, 0, NaN, NaN, NaN]))
+
+    expect(nan.idx.length).toBe(12)
   })
 })
 
@@ -376,6 +383,196 @@ describe('arch-scene-3d mount', () => {
     mockCtl.fire(ORBIT_EVENTS.END)
 
     handle.destroy()
+  })
+
+  test('saveCamState no-ops when sessionStorage is unavailable', async () => {
+    const handle = await mountArchScene3d(canvas, ROOTS, jest.fn())
+
+    expect(handle).not.toBeNull()
+
+    const desc = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
+
+    try {
+      // SSR-ish arm — `typeof sessionStorage === 'undefined'` guards the
+      // persistence write inside saveCamState (orbit start/end).
+      Object.defineProperty(globalThis, 'sessionStorage', {
+        value: undefined,
+        configurable: true,
+        writable: true,
+      })
+
+      mockCtl.fire(ORBIT_EVENTS.START)
+      mockCtl.fire(ORBIT_EVENTS.END)
+    } finally {
+      if (desc) Object.defineProperty(globalThis, 'sessionStorage', desc)
+      else delete globalThis.sessionStorage
+    }
+
+    handle.destroy()
+  })
+
+  test('dispose while label bitmaps are pending closes the late bitmaps', async () => {
+    // Every dir node enqueues its own createImageBitmap — collect ALL
+    // resolvers so Promise.all(labelJobs) actually settles.
+    const pending = []
+
+    const bmp = {
+      width: 64,
+      height: 16,
+      closed: false,
+      close() {
+        this.closed = true
+      },
+    }
+
+    globalThis.createImageBitmap = () =>
+      new Promise((r) => {
+        pending.push(r)
+      })
+
+    const handle = await mountArchScene3d(canvas, ROOTS, jest.fn())
+
+    await flush()
+
+    expect(pending.length).toBeGreaterThan(0)
+
+    // buildGraph parked inside Promise.all(labelJobs) — destroy lands
+    // `disposed` before any bitmap resolves.
+    handle.destroy()
+    pending.forEach((r) => r(bmp))
+    await flush()
+
+    expect(bmp.closed).toBe(true)
+  })
+
+  test('empty roots produce a graph with no edge geometry', async () => {
+    const handle = await mountArchScene3d(canvas, [], jest.fn())
+
+    expect(handle).not.toBeNull()
+
+    await flush()
+
+    // One synthetic root node → no parents → edges.idx empty → the
+    // `edges.idx.length > 0` else arm. (Node mesh + its dir label sprite
+    // each record a set_position write.)
+    expect(mockSurface.calls.positions.length).toBeGreaterThanOrEqual(1)
+
+    handle.destroy()
+  })
+
+  test('pick misses all spheres, inside-origin candidates drop, and the portal root never navigates', async () => {
+    const onPick = jest.fn()
+
+    const handle = await mountArchScene3d(canvas, ROOTS, onPick)
+
+    await flush()
+
+    // best < 0 — ray into empty space → `if (best >= 0)` else arm.
+    mockSurface.ray = [9999, 9999, 9999, 0, 0, -1]
+
+    canvas.dispatchEvent(new MouseEvent('click', { clientX: 5, clientY: 5, bubbles: true }))
+
+    expect(onPick).not.toHaveBeenCalled()
+
+    // Origin inside a sphere → t < 0 → `t > 0 && t < bestT` false arm.
+    const [, x, y, z] = mockSurface.calls.positions[1]
+
+    mockSurface.ray = [x, y, z, 0, 0, 1]
+
+    canvas.dispatchEvent(new MouseEvent('click', { clientX: 5, clientY: 5, bubbles: true }))
+
+    expect(onPick).not.toHaveBeenCalled()
+
+    // The synthetic portal root carries path '' — a hit resolves but
+    // `if (path)` keeps onPick quiet.
+    mockSurface.ray = [0, 0, -10, 0, 0, 1]
+
+    canvas.dispatchEvent(new MouseEvent('click', { clientX: 5, clientY: 5, bubbles: true }))
+
+    expect(onPick).not.toHaveBeenCalled()
+
+    handle.destroy()
+  })
+
+  test('tick covers the intro-skip, update-false, label-fade, env-fallback, catch and disposed arms', async () => {
+    // Saved pose → introFrom = 0 → `if (introFrom)` else arm once ticked.
+    sessionStorage.setItem(
+      CACHE_STORAGE_KEYS.DOCS_SCENE_STATE,
+      JSON.stringify({ p: [0, 40, 50], t: [0, 0, 0], off: false })
+    )
+
+    const origRaf = globalThis.requestAnimationFrame
+    const origCancel = globalThis.cancelAnimationFrame
+    const wDesc = Object.getOwnPropertyDescriptor(globalThis, 'window')
+    const dprDesc = Object.getOwnPropertyDescriptor(globalThis.window, 'devicePixelRatio')
+    let tickFn = null
+
+    globalThis.requestAnimationFrame = (fn) => {
+      tickFn = fn
+
+      return 1
+    }
+    globalThis.cancelAnimationFrame = () => {}
+
+    const handle = await mountArchScene3d(canvas, ROOTS, jest.fn())
+
+    try {
+      // Two flushes — computePositions → buildGraph → bitmap .then all
+      // have to settle before labels[] is populated for the fade arm.
+      await flush()
+      await flush()
+
+      expect(tickFn).not.toBeNull()
+
+      // update-false arm: no orbit write this tick; label-fade arm:
+      // distance 0 reveals every label → a=1 ≠ l.a=0 → set_color writes.
+      mockCtl.moved = false
+      mockCtl.distance = 0
+
+      const colors = mockSurface.calls.colors.length
+      const orbits = mockSurface.calls.orbits.length
+
+      tickFn(performance.now())
+
+      expect(mockSurface.calls.orbits.length).toBe(orbits)
+      expect(mockSurface.calls.colors.length).toBeGreaterThan(colors)
+
+      // `typeof window === 'undefined'` SSR arm of the dpr probe.
+      Object.defineProperty(globalThis, 'window', {
+        value: undefined,
+        configurable: true,
+        writable: true,
+      })
+      tickFn(performance.now())
+      Object.defineProperty(globalThis, 'window', wDesc)
+
+      // `window.devicePixelRatio || 1` falsy arm.
+      const w = globalThis.window
+
+      Object.defineProperty(w, 'devicePixelRatio', { value: 0, configurable: true })
+      tickFn(performance.now())
+
+      if (dprDesc) Object.defineProperty(w, 'devicePixelRatio', dprDesc)
+
+      // catch arm — a throwing frame devWarns and returns without rearming.
+      mockSurface.frame = () => {
+        throw new Error('gpu crash')
+      }
+      tickFn(performance.now())
+
+      // disposed arm — a queued tick after destroy returns immediately.
+      handle.destroy()
+      tickFn(performance.now())
+    } finally {
+      globalThis.requestAnimationFrame = origRaf
+      globalThis.cancelAnimationFrame = origCancel
+
+      if (Object.getOwnPropertyDescriptor(globalThis, 'window').value === undefined) {
+        Object.defineProperty(globalThis, 'window', wDesc)
+      }
+
+      handle.destroy()
+    }
   })
 })
 

@@ -19,7 +19,13 @@ import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
 import { ROUTE_PATHS } from '@core/tokens/routes/paths.js'
 
 // Shared raycast-hit queue — the click handler picks hit[0].userData.path.
-const mockThreeState = { hits: [], rendererThrow: false, renderThrow: false }
+const mockThreeState = {
+  hits: [],
+  rendererThrow: false,
+  renderThrow: false,
+  noCanvasTex: false,
+  noSprite: false,
+}
 
 jest.unstable_mockModule('three', () => {
   class Vector3 {
@@ -175,7 +181,11 @@ jest.unstable_mockModule('three', () => {
     Color,
     Sprite,
     SpriteMaterial,
-    CanvasTexture,
+    // Getter — tails flip `mockThreeState.noCanvasTex` to exercise the
+    // `!THREE.CanvasTexture` label guard without a second mock module.
+    get CanvasTexture() {
+      return mockThreeState.noCanvasTex ? undefined : CanvasTexture
+    },
     Raycaster,
     WebGLRenderer: class {
       constructor() {
@@ -309,6 +319,24 @@ describe('docs architecture scene', () => {
 
     handle.destroy()
     canvas.remove()
+  })
+
+  test('labels skip cleanly when THREE.CanvasTexture is unavailable', async () => {
+    mockThreeState.noCanvasTex = true
+
+    const canvas = document.createElement(HTML_TAGS.CANVAS)
+
+    document.body.appendChild(canvas)
+
+    const handle = mountArchScene(canvas, ROOTS, jest.fn())
+
+    expect(handle).not.toBe(null)
+
+    await flush()
+
+    handle.destroy()
+    canvas.remove()
+    mockThreeState.noCanvasTex = false
   })
 
   test('renderer construction failure lands on the null fallback', () => {
