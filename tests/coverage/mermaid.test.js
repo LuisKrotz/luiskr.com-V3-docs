@@ -9,6 +9,8 @@ import { describe, test, expect } from '@jest/globals'
 import { renderMermaidBlocks } from '@docs/mermaid.js'
 import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
 import { __diagramState } from '@core/utils/wasm/wasm-diagram.js'
+import { __ortState, __resetOrt } from 'onnxruntime-web'
+import { resetMlEngine } from '@core/utils/ml/ort-engine.js'
 
 describe('docs mermaid', () => {
   test('no mermaid blocks → engine never loads', async () => {
@@ -76,5 +78,29 @@ describe('docs mermaid', () => {
 
     expect(theme.font).toBe('sans-serif')
     expect(theme.fontSize).toBe(14)
+  })
+
+  test('expensive diagrams yield a task turn before rendering', async () => {
+    resetMlEngine()
+    __resetOrt()
+    // Predicted cost above DIAGRAM_DEFER_MS → the defer arm yields once.
+    __ortState.outputs = { cost: { data: new Float32Array([200]) } }
+
+    const box = document.createElement('div')
+
+    // Big nested graph — exercises every feature scanner (edges, nodes,
+    // subgraphs, self-messages) plus the defer path.
+    box.innerHTML =
+      `<div class="${DOCS_CLASSES.DOCS_MERMAID}">` +
+      'flowchart TB\nsubgraph a\nA[one]-->B{two}\nA--xA\nB-.->C(three)\nend\nC-->>C\nsubgraph b\nD-->E\nend' +
+      '</div>'
+
+    await renderMermaidBlocks(box)
+
+    expect(__diagramState.lastSource).toContain('subgraph')
+    expect(box.querySelector('svg')).not.toBeNull()
+
+    __ortState.outputs = null
+    resetMlEngine()
   })
 })

@@ -21,11 +21,62 @@ import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
 import { DOCS_STRINGS } from '@core/tokens/strings/docs.js'
 import { THEME_CSS_PROPS } from '@core/tokens/css/theme.js'
 import { ARIA_ATTRS } from '@core/tokens/attrs/aria.js'
+import { ML } from '@core/tokens/data/ml.js'
 import { devWarn } from '@core/devlog.js'
 import { renderDiagram } from '@core/utils/wasm/wasm-diagram.js'
+import { runMlModel } from '@core/utils/ml/ort-engine.js'
 
 /** Default font size when the computed style is unparsable. */
 const FONT_SIZE_FALLBACK = 14
+
+/**
+ * Cheap source scanners feeding the diagram-cost model — counts of each
+ * structural feature, not a parse (the wasm engine still does that).
+ */
+const EDGE_RE = /-->>|->>|-->|-.->|--x/g
+const NODE_RE = /[[({]/g
+const NEST_RE = /\bsubgraph\b/g
+const SELF_RE = /(\b\w+)\s*[-.]+>{1,2}\s*\1\b/g
+
+/** Counts regex matches without allocating a match array. */
+const countMatches = (re: RegExp, source: string): number => {
+  re.lastIndex = 0
+
+  let n = 0
+
+  while (re.exec(source)) n++
+
+  return n
+}
+
+/**
+ * Scores a diagram's predicted render+layout cost through the ONNX
+ * `diagram-cost` model (WebNN → WebGPU → wasm EP). When the predicted
+ * cost clears DIAGRAM_DEFER_MS the caller yields one task turn before
+ * rendering so a large graph can't long-task the docs view between
+ * blocks. A null score (no runtime/model) means render immediately —
+ * the same behavior as before the model existed.
+ * @param source Raw mermaid source for the block.
+ * @returns Predicted cost in ms, or null when ML is unavailable.
+ */
+const predictDiagramCost = async (source: string): Promise<number | null> => {
+  const out = await runMlModel(ML.MODEL_DIAGRAM, {
+    [ML.IN_FEATURES]: {
+      data: new Float32Array([
+        countMatches(NODE_RE, source) / ML.DIAGRAM_NORM_NODES,
+        countMatches(EDGE_RE, source) / ML.DIAGRAM_NORM_EDGES,
+        countMatches(NEST_RE, source) / ML.DIAGRAM_NORM_NEST,
+        countMatches(SELF_RE, source) / ML.DIAGRAM_NORM_SELF,
+      ]),
+      dims: [1, ML.DIAGRAM_FEATURE_DIM],
+    },
+  })
+
+  return out?.[ML.OUT_COST]?.[0] ?? null
+}
+
+/** Yields one macrotask turn — cheap cooperative scheduling point. */
+const yieldTask = (): Promise<void> => new Promise((r) => setTimeout(r))
 
 /**
  * Reads the live theme custom properties + computed type into the
@@ -95,9 +146,16 @@ export const renderMermaidBlocks = async (container: HTMLElement): Promise<void>
   const theme = themeJson(getComputedStyle(blocks[0]))
 
   // Per-block render — the engine returns one `<svg>` string per source;
-  // it lands via innerHTML exactly where mermaid's output used to.
+  // it lands via innerHTML exactly where mermaid's output used to. The
+  // diagram-cost model (WebNN/GPU/wasm) predicts each render's ms — a
+  // projected long-task diagram yields one turn first so the docs view
+  // stays interactive between blocks.
   for (const [i, block] of blocks.entries()) {
     try {
+      const cost = await predictDiagramCost(sources[i])
+
+      if (cost != null && cost > ML.DIAGRAM_DEFER_MS) await yieldTask()
+
       block.innerHTML = await renderDiagram(sources[i], theme)
       block.setAttribute('data-processed', 'true')
     } catch (err) {
