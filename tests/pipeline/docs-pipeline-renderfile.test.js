@@ -102,10 +102,10 @@ describe('renderFile', () => {
       '<html><head><link rel="stylesheet" href="base.css"><link rel="stylesheet" href="https://cdn.example.com/x.css"></head><body><p>r</p></body></html>'
 
     const html = renderFile('html', doc, 'html', {
-      linkResolver: (href) => (href === 'base.css' ? '.pad1{color:red}' : null),
+      linkResolver: (href) => (href === 'base.css' ? '.pad1{margin:0}' : null),
     })
 
-    expect(html).toContain('<style>.pad1{color:red}</style>')
+    expect(html).toContain('<style>.pad1{margin:0}</style>')
     expect(html).not.toContain('<link')
     expect(html).not.toContain('cdn.example.com')
   })
