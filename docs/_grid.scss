@@ -11,6 +11,16 @@
     gap: to-rem($space-md);
   }
 
+  // Card heading wrapper — every grid entry is a real h3 so AT
+  // heading-jump and crawlers enumerate each doc; the wrapped anchor
+  // keeps all the card chrome.
+  &-card-heading {
+    margin: 0;
+    padding: 0;
+    font: inherit;
+    display: contents;
+  }
+
   &-card {
     pointer-events: auto;
     background: color-mix(in srgb, var(--bg-primary) 90%, transparent);

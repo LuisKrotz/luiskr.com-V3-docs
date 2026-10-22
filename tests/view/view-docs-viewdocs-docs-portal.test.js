@@ -15,7 +15,7 @@ import { DOCS_STRINGS } from '@core/tokens/strings/docs.js'
 import { DOCS_SELECTORS } from '@core/tokens/selectors/docs.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 import { SCHEMA_STRINGS } from '@core/tokens/strings/schema.js'
-import { CLIPBOARD_EVENTS, KEYBOARD_EVENTS } from '@core/tokens/events/dom.js'
+import { CLIPBOARD_EVENTS, KEYBOARD_EVENTS, MOUSE_EVENTS } from '@core/tokens/events/dom.js'
 import { KEYS } from '@core/tokens/primitives.js'
 import { SOCIAL_URLS } from '@core/tokens/media/urls.js'
 
@@ -94,6 +94,98 @@ describe('ViewDocs — docs portal', () => {
     expect($(`#${DOCS_IDS.SCENE}`)).toBeTruthy()
     expect($(`.${DOCS_CLASSES.DOCS_GRID}`).children.length).toBe(3)
     expect(view.shadowRoot.querySelector('legal-footer')).toBeFalsy()
+  })
+
+  test('all docs are headings: tree h2, card h3s + the complete index nav', () => {
+    const $ = (sel) => view.shadowRoot.querySelector(sel)
+    const $$ = (sel) => [...view.shadowRoot.querySelectorAll(sel)]
+
+    // Tree landmark carries an sr-only h2.
+    const treeHead = $(`.${DOCS_CLASSES.DOCS_NAV} h2`)
+
+    expect(treeHead.textContent).toBe(DOCS_STRINGS.TREE_LABEL)
+
+    // Every grid card is wrapped in an h3 — each listed doc is a heading.
+    const cardHeads = $$(`.${DOCS_CLASSES.DOCS_CARD_HEADING}`)
+
+    expect(cardHeads.length).toBe(3)
+    expect(cardHeads.every((hEl) => hEl.tagName === 'H3' && hEl.querySelector('a'))).toBe(true)
+
+    // The complete index lists every manifest node as a heading link.
+    const index = $(`nav[aria-label="${DOCS_STRINGS.INDEX_LABEL}"]`)
+
+    expect(index).toBeTruthy()
+    expect(index.querySelector('h2').textContent).toBe(DOCS_STRINGS.INDEX_TITLE)
+
+    // 3 buckets + 9 manifest nodes, all as heading links.
+    expect(index.querySelectorAll('a').length).toBe(12)
+
+    const heads = [...index.querySelectorAll('h3, h4, h5')]
+
+    expect(heads.map((hEl) => hEl.textContent)).toEqual(
+      expect.arrayContaining([
+        'Documentation',
+        'Quality Reports',
+        'Source Code',
+        'website.md',
+        'App.tsx',
+      ])
+    )
+
+    // Deep nodes sit one heading level under their dir (h4 → h5).
+    const websiteHead = heads.find((hEl) => hEl.textContent === 'website.md')
+
+    expect(websiteHead.tagName).toBe('H5')
+  })
+
+  test('index links route through navigateDocs; modified clicks keep native semantics', async () => {
+    const index = view.shadowRoot.querySelector(`nav[aria-label="${DOCS_STRINGS.INDEX_LABEL}"]`)
+
+    const link = [...index.querySelectorAll('a')].find((a) => a.textContent === 'website.md')
+
+    pushed.length = 0
+    link.dispatchEvent(new MouseEvent(MOUSE_EVENTS.CLICK, { bubbles: true, cancelable: true }))
+
+    expect(pushed).toContain('/docs/docs/architecture/website.md')
+
+    // Ctrl-click is not a plain click — native new-tab semantics stay.
+    pushed.length = 0
+    link.dispatchEvent(
+      new MouseEvent(MOUSE_EVENTS.CLICK, { bubbles: true, cancelable: true, ctrlKey: true })
+    )
+
+    expect(pushed.length).toBe(0)
+
+    // Root-bucket links route through the same navigateDocs path.
+    const bucketLink = [...index.querySelectorAll('h3 a')].find(
+      (a) => a.textContent === 'Documentation'
+    )
+
+    pushed.length = 0
+    bucketLink.dispatchEvent(
+      new MouseEvent(MOUSE_EVENTS.CLICK, { bubbles: true, cancelable: true })
+    )
+
+    expect(pushed).toContain('/docs/docs')
+
+    pushed.length = 0
+    bucketLink.dispatchEvent(
+      new MouseEvent(MOUSE_EVENTS.CLICK, { bubbles: true, cancelable: true, ctrlKey: true })
+    )
+
+    expect(pushed.length).toBe(0)
+
+    // A docsPath with no manifest node falls back to the raw path as the
+    // viewer heading.
+    view.onRouteParamChange({ params: { docsPath: 'ghost/file.md' } })
+    await flush()
+
+    const viewerHead = view.shadowRoot.querySelector(
+      `.${DOCS_CLASSES.DOCS_VIEWER_PATH}`
+    )?.previousElementSibling
+
+    expect(viewerHead.tagName).toBe('H2')
+    expect(viewerHead.textContent).toBe('ghost/file.md')
   })
 
   test('root grid renders the three manifest buckets with generated folder art', () => {
