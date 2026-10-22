@@ -134,13 +134,42 @@
         color: var(--text-primary);
       }
 
-      .quiet {
+      .quiet,
+      .ignore-none {
         color: var(--text-secondary);
+      }
+
+      // istanbul halves link opacity inside .quiet — the blend drops the
+      // themed link ink below WCAG AA against the dark surface, so the
+      // footer link stays full-strength (already AAA via --cov-link).
+      .quiet a {
+        opacity: 1;
       }
 
       .fraction {
         background: var(--cov-fraction-bg);
         color: var(--cov-fraction-ink);
+      }
+
+      pre.prettyprint {
+        border-color: var(--cov-border);
+      }
+
+      // Sort arrows — istanbul paints them from a sprite png (unreachable
+      // inside the payload sandbox); themed border-triangles inherit the
+      // header ink instead. Unsorted columns show nothing.
+      .coverage-summary .sorter::after {
+        content: '';
+        display: inline-block;
+        border: to-rem($space-2xs) solid transparent;
+      }
+
+      .coverage-summary .sorted .sorter::after {
+        border-bottom-color: currentColor;
+      }
+
+      .coverage-summary .sorted-desc .sorter::after {
+        border-top-color: currentColor;
       }
 
       .coverage-summary td.empty {

@@ -277,7 +277,6 @@ export const renderDocs = (view: ViewDocs) => {
 
         <nav
           className={DOCS_CLASSES.DOCS_NAV}
-          role={ARIA_ATTRS.ROLE_NAVIGATION}
           aria-label={DOCS_STRINGS.TREE_LABEL}
           onKeydown={(e: Event) => view.onTreeKey(e as KeyboardEvent)}
         >
@@ -291,7 +290,7 @@ export const renderDocs = (view: ViewDocs) => {
           </ul>
         </nav>
 
-        <main className={DOCS_CLASSES.DOCS_MAIN}>
+        <section className={DOCS_CLASSES.DOCS_MAIN} aria-label={DOCS_STRINGS.MAIN_LABEL}>
           {crumbBar(view)}
 
           {view.filePayload || view.fileLoading ? (
@@ -325,6 +324,7 @@ export const renderDocs = (view: ViewDocs) => {
             <div
               className={DOCS_CLASSES.DOCS_GRID}
               id={DOCS_IDS.GRID}
+              role={ARIA_ATTRS.ROLE_REGION}
               aria-label={DOCS_STRINGS.GRID_LABEL}
               onKeydown={(e: Event) => view.onGridKey(e as KeyboardEvent)}
             >
@@ -335,7 +335,7 @@ export const renderDocs = (view: ViewDocs) => {
           {!node && !isRoot ? (
             <p className={DOCS_CLASSES.DOCS_UPDATED}>{DOCS_STRINGS.NOT_FOUND_PATH}</p>
           ) : null}
-        </main>
+        </section>
       </div>
     </div>
   ) as unknown as HTMLElement
