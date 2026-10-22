@@ -7,6 +7,7 @@
  * delegates to the host component's methods.
  */
 
+import { A11Y_CLASSES } from '@core/tokens/classes/a11y.js'
 import { ARIA_ATTRS } from '@core/tokens/attrs/aria.js'
 import { DATA_ATTRS } from '@core/tokens/attrs/data.js'
 import { FORM_ATTRS } from '@core/tokens/attrs/form.js'
@@ -19,7 +20,7 @@ import { DOCS_STRINGS } from '@core/tokens/strings/docs.js'
 import { h } from '@core/jsx.js'
 import { isPlainClick } from '@core/utils/dom.js'
 import { folderSvg } from './folder-svg.js'
-import { crumbsForPath } from './manifest.js'
+import { crumbsForPath, getDocsManifest } from './manifest.js'
 import type { ViewDocs } from './Docs.js'
 import type { DocsNode } from './manifest.js'
 
@@ -98,31 +99,131 @@ const treeNodes = (view: ViewDocs, nodes: DocsNode[]): HTMLElement[] =>
 /**
  * Grid cards — dirs and files get the generated folder SVG and navigate
  * into/open the node on click. Rendered as real anchors so the folder
- * grid is crawlable and new-tab gestures work natively.
+ * grid is crawlable and new-tab gestures work natively; each card sits
+ * inside an h3 so every listed document is a real heading AT heading-jump
+ * (and crawlers) can enumerate.
  */
 const gridCards = (view: ViewDocs, nodes: DocsNode[]): HTMLElement[] =>
   nodes.map((node) => {
     const isDir = node.type === 'dir'
 
     return (
-      <a
-        key={node.path}
-        href={docsHref(node.path)}
-        className={DOCS_CLASSES.DOCS_CARD}
-        {...{ [DATA_ATTRS.DATA_PATH]: node.path }}
-        onClick={(e: Event) => {
-          if (!isPlainClick(e)) return
+      <h3 key={node.path} className={DOCS_CLASSES.DOCS_CARD_HEADING}>
+        <a
+          href={docsHref(node.path)}
+          className={DOCS_CLASSES.DOCS_CARD}
+          {...{ [DATA_ATTRS.DATA_PATH]: node.path }}
+          onClick={(e: Event) => {
+            if (!isPlainClick(e)) return
 
-          e.preventDefault()
+            e.preventDefault()
 
-          view.pickNode(node)
-        }}
-      >
-        <span className={DOCS_CLASSES.DOCS_CARD_ART}>{folderSvg(node.name, isDir)}</span>
-        <span className={DOCS_CLASSES.DOCS_CARD_LABEL}>{node.name}</span>
-      </a>
+            view.pickNode(node)
+          }}
+        >
+          <span className={DOCS_CLASSES.DOCS_CARD_ART}>{folderSvg(node.name, isDir)}</span>
+          <span className={DOCS_CLASSES.DOCS_CARD_LABEL}>{node.name}</span>
+        </a>
+      </h3>
     )
   }) as HTMLElement[]
+
+// ─── Complete document index ─────────────────────────────────────────────────
+// The manifest is static per build, so the index DOM is built once and the
+// same node is re-attached on every render — the links delegate to whatever
+// view instance rendered last via `_indexView`.
+
+/** The view the memoized index links delegate navigation to. */
+let _indexView: ViewDocs | null = null
+
+/** The built-once index subtree (all ~3.5k manifest nodes as headings). */
+let _indexEl: HTMLElement | null = null
+
+/**
+ * Index link for one manifest node — a real /docs/<path> anchor (crawlable,
+ * new-tab friendly) that stays on the SPA router for plain clicks.
+ * @param node The manifest node to link.
+ * @returns The anchor element.
+ */
+const indexLink = (node: DocsNode): HTMLElement =>
+  h(
+    'a',
+    {
+      href: docsHref(node.path),
+      onClick: (e: Event) => {
+        if (!isPlainClick(e)) return
+
+        e.preventDefault()
+
+        _indexView?.navigateDocs(node.path)
+      },
+    },
+    node.name
+  ) as HTMLElement
+
+/**
+ * Recursive index nodes — every manifest node becomes a heading wrapping
+ * its canonical link. Heading level is 3 + depth capped at h6, so the
+ * ladder mirrors the tree (bucket h3 → h4 → h5 → h6 for deep branches).
+ * @param nodes The manifest nodes at this depth.
+ * @param depth 1-based depth below the bucket heading.
+ * @returns Flat heading list in document order.
+ */
+const indexNodes = (nodes: DocsNode[], depth: number): HTMLElement[] =>
+  nodes.flatMap((node) => {
+    const heading = h(`h${Math.min(3 + depth, 6)}`, null, indexLink(node)) as HTMLElement
+
+    const kids =
+      node.type === 'dir' && node.children?.length ? indexNodes(node.children, depth + 1) : []
+
+    return [heading, ...kids]
+  })
+
+/**
+ * The complete document index — an sr-only nav listing every manifest node
+ * as a heading link so AT heading navigation and agents can reach all docs
+ * without unfolding the tree. Built once (manifest is static), re-attached
+ * on subsequent renders; real DOM so crawlers index it.
+ * @param view The host view (links delegate navigation to it).
+ * @returns The memoized index nav element.
+ */
+const docsIndex = (view: ViewDocs): HTMLElement => {
+  _indexView = view
+
+  if (!_indexEl) {
+    _indexEl = h(
+      'nav',
+      {
+        className: A11Y_CLASSES.SR_ONLY,
+        'aria-label': DOCS_STRINGS.INDEX_LABEL,
+      },
+      h('h2', null, DOCS_STRINGS.INDEX_TITLE),
+      ...getDocsManifest().roots.flatMap((root) => [
+        h(
+          'h3',
+          null,
+          h(
+            'a',
+            {
+              href: docsHref(root.root),
+              onClick: (e: Event) => {
+                if (!isPlainClick(e)) return
+
+                e.preventDefault()
+
+                _indexView?.navigateDocs(root.root)
+              },
+            },
+            root.label
+          )
+        ) as HTMLElement,
+        ...indexNodes(root.children, 1),
+      ])
+    ) as HTMLElement
+  }
+
+  return _indexEl
+}
 
 /**
  * Editable breadcrumb strip — each crumb is a jump-to link; the trailing
@@ -280,6 +381,7 @@ export const renderDocs = (view: ViewDocs) => {
           aria-label={DOCS_STRINGS.TREE_LABEL}
           onKeydown={(e: Event) => view.onTreeKey(e as KeyboardEvent)}
         >
+          <h2 className={A11Y_CLASSES.SR_ONLY}>{DOCS_STRINGS.TREE_LABEL}</h2>
           <ul
             className={DOCS_CLASSES.DOCS_TREE}
             id={DOCS_IDS.TREE}
@@ -291,6 +393,12 @@ export const renderDocs = (view: ViewDocs) => {
         </nav>
 
         <section className={DOCS_CLASSES.DOCS_MAIN} aria-label={DOCS_STRINGS.MAIN_LABEL}>
+          {/* Region heading — the current folder's own name so the h2 is
+              meaningful ('docs', 'coverage-core'…), not a generic label. */}
+          <h2 className={A11Y_CLASSES.SR_ONLY}>
+            {isRoot ? DOCS_STRINGS.MAIN_LABEL : node?.name || view.docsPath}
+          </h2>
+
           {crumbBar(view)}
 
           {view.filePayload || view.fileLoading ? (
@@ -306,6 +414,9 @@ export const renderDocs = (view: ViewDocs) => {
                 >
                   {DOCS_STRINGS.VIEWER_BACK}
                 </button>
+                {/* The open file is a real heading — AT heading-jump lands
+                    on the document being read. */}
+                <h2 className={A11Y_CLASSES.SR_ONLY}>{view.node?.name || view.docsPath}</h2>
                 <span
                   className={DOCS_CLASSES.DOCS_VIEWER_PATH}
                   {...{ [MICRODATA_ATTRS.ITEMPROP]: MICRODATA_VALUES.PROP_URL }}
@@ -335,6 +446,10 @@ export const renderDocs = (view: ViewDocs) => {
           {!node && !isRoot ? (
             <p className={DOCS_CLASSES.DOCS_UPDATED}>{DOCS_STRINGS.NOT_FOUND_PATH}</p>
           ) : null}
+
+          {/* Complete document index — every manifest node as a heading
+              link; memoized DOM, re-attached each render. */}
+          {docsIndex(view)}
         </section>
       </div>
     </div>
