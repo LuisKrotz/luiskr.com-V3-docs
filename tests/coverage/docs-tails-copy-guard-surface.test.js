@@ -15,6 +15,7 @@ const _flush = (ms = 40) => new Promise((r) => setTimeout(r, ms))
 describe('copy guard surface', () => {
   let host
   let origFetch
+  let origBeacon
 
   const protectedState = { on: true }
 
@@ -33,12 +34,28 @@ describe('copy guard surface', () => {
 
     origFetch = globalThis.fetch
     globalThis.fetch = jest.fn(async () => ({}))
+
+    // happy-dom's navigator ships a working sendBeacon — the telemetry
+    // transport prefers it over fetch, so pin a declining stub to keep
+    // assertions on the fetch keepalive path.
+    origBeacon = navigator.sendBeacon
+    Object.defineProperty(navigator, 'sendBeacon', {
+      value: () => false,
+      configurable: true,
+      writable: true,
+    })
+
     protectedState.on = true
   })
 
   afterEach(() => {
     host.remove()
     globalThis.fetch = origFetch
+    Object.defineProperty(navigator, 'sendBeacon', {
+      value: origBeacon,
+      configurable: true,
+      writable: true,
+    })
   })
 
   test('cut hijacks the clipboard payload to the repo URL', () => {
