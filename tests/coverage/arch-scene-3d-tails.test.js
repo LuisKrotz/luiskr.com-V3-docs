@@ -41,9 +41,8 @@ jest.unstable_mockModule('@core/utils/gpu/orbit-controller.js', () => ({
   bindOrbit: () => mockCtl,
 }))
 
-const { mountArchScene3d, parseInk, poseFromPos, buildEdges } = await import(
-  '@docs/arch-scene-3d.js'
-)
+const { mountArchScene3d, parseInk, poseFromPos, buildEdges } =
+  await import('@docs/arch-scene-3d.js')
 const { mountArchScene } = await import('@docs/arch-scene.js')
 
 /* ── Fixture tree ─────────────────────────────────────────────── */
@@ -237,12 +236,7 @@ describe('arch-scene-3d helpers', () => {
     ]
     // Edge a→b horizontal, a→c coincident (skipped), a→d vertical (the
     // degenerate cross(dir,+Y) arm).
-    const positions = new Float32Array([
-      0, 0, 0,
-      10, 0, 0,
-      0, 0, 0,
-      0, 5, 0,
-    ])
+    const positions = new Float32Array([0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 5, 0])
 
     const e = buildEdges(placed, positions)
 
@@ -331,20 +325,14 @@ describe('arch-scene-3d mount', () => {
 
     mockSurface.ray = [x, y, z - 4, 0, 0, 1]
 
-    canvas.dispatchEvent(
-      new MouseEvent('click', { clientX: 5, clientY: 5, bubbles: true })
-    )
+    canvas.dispatchEvent(new MouseEvent('click', { clientX: 5, clientY: 5, bubbles: true }))
 
     expect(onPick).toHaveBeenCalled()
 
     // Slop — a far pointerdown makes the click a drag.
     onPick.mockClear()
-    canvas.dispatchEvent(
-      new PointerEvent('pointerdown', { clientX: 5, clientY: 5, bubbles: true })
-    )
-    canvas.dispatchEvent(
-      new MouseEvent('click', { clientX: 500, clientY: 5, bubbles: true })
-    )
+    canvas.dispatchEvent(new PointerEvent('pointerdown', { clientX: 5, clientY: 5, bubbles: true }))
+    canvas.dispatchEvent(new MouseEvent('click', { clientX: 500, clientY: 5, bubbles: true }))
 
     expect(onPick).not.toHaveBeenCalled()
 
@@ -553,6 +541,12 @@ describe('arch-scene-3d mount', () => {
       tickFn(performance.now())
 
       if (dprDesc) Object.defineProperty(w, 'devicePixelRatio', dprDesc)
+
+      // `(now - last) / 1e3 || .016` — a repeated timestamp feeds the fallback dt.
+      const same = performance.now()
+
+      tickFn(same)
+      tickFn(same)
 
       // catch arm — a throwing frame devWarns and returns without rearming.
       mockSurface.frame = () => {

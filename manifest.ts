@@ -2,29 +2,29 @@
  * @file docs/manifest.ts
  * @description Build-time docs manifest access + path resolution.
  *
- * `virtual:docs-manifest` is emitted by the vite docs-portal plugin — a
- * tree of the publishable roots (shared/docs, reports/, per-module
- * coverage/, and every source module) with per-file ids that double as
- * `/docs-content/<id>.json` fetch paths.
- * File payloads are NOT in the manifest; they're fetched on open so the
- * route chunk stays small against ~3.5k documents.
+ * `virtual:docs-manifest` arrives as compact interned tuples (emitted by
+ * shared/build/docs/encode.mjs): every distinct name/label/kind/rel-path
+ * lives once in `strings`, and each node tuple carries only a name index
+ * plus an mtime (files) or child tuples (dirs). `path`/`id` are never
+ * serialized — hydrateManifest() derives them positionally, with an
+ * optional trailing rel index covering case-merged subtrees whose real
+ * rel path cannot be derived. File payloads are NOT in the manifest;
+ * they're fetched on open so the route chunk stays small against ~3.5k
+ * documents.
  */
 
 import { DOCS_STRINGS } from '@core/tokens/strings/docs.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
-import manifest from 'virtual:docs-manifest'
+import manifest, { type DocsWireManifest, type DocsWireNode } from 'virtual:docs-manifest'
 
-/** One manifest node — dir carries children, file carries format/size/id. */
+/** One manifest node — dir carries children, file carries id + mtime. */
 export interface DocsNode {
   type: 'dir' | 'file'
   name: string
   path: string
   children?: DocsNode[]
   id?: string
-  format?: string
-  size?: number
   mtime?: string
-  embedded?: boolean
 }
 
 /** A publishable root bucket (docs / reports / coverage-* / source modules). */
@@ -56,7 +56,70 @@ export interface DocsFilePayload {
   mtime: string
 }
 
-const _manifest = manifest as DocsManifest
+/**
+ * Expands one wire children list into manifest nodes. Names and rel-path
+ * overrides resolve through the strings table; `path` is the root name
+ * plus the ancestor rel chain, `id` the same rel under the ':'
+ * namespace, and file `mtime` the epoch-ms value restored to ISO — the
+ * same fields the scan emitted without any of them crossing the wire.
+ * @param tuples    Wire children tuples of one parent.
+ * @param wire      Full wire manifest (strings table).
+ * @param root      Root namespace ('docs' → path/id prefix).
+ * @param parentRel Parent's real rel path ('' at a root's top level).
+ * @returns Hydrated nodes in wire order.
+ */
+const hydrateChildren = (
+  tuples: DocsWireNode[],
+  wire: DocsWireManifest,
+  root: string,
+  parentRel: string
+): DocsNode[] =>
+  tuples.map((t): DocsNode => {
+    const name = wire.strings[t[0]]
+
+    const rel =
+      typeof t[2] === 'number'
+        ? wire.strings[t[2]]
+        : parentRel
+          ? `${parentRel}${CHAR_STRINGS.SLASH}${name}`
+          : name
+
+    const path = `${root}${CHAR_STRINGS.SLASH}${rel}`
+
+    return Array.isArray(t[1])
+      ? { type: 'dir', name, path, children: hydrateChildren(t[1], wire, root, rel) }
+      : {
+          type: 'file',
+          name,
+          path,
+          id: `${root}${CHAR_STRINGS.COLON}${rel}`,
+          mtime: new Date(t[1]).toISOString(),
+        }
+  })
+
+/**
+ * Expands the wire manifest into the runtime tree — roots decode their
+ * name/label/kind through the strings table, children hydrate
+ * recursively. Runs once at module init so getDocsManifest() stays a
+ * cheap accessor.
+ * @param wire Compact manifest from virtual:docs-manifest.
+ * @returns The full DocsManifest the portal consumes.
+ */
+const hydrateManifest = (wire: DocsWireManifest): DocsManifest => ({
+  generated: wire.generated,
+  roots: wire.roots.map(([rootIdx, labelIdx, kindIdx, children]) => {
+    const root = wire.strings[rootIdx]
+
+    return {
+      root,
+      label: wire.strings[labelIdx],
+      kind: wire.strings[kindIdx] as DocsRoot['kind'],
+      children: hydrateChildren(children, wire, root, CHAR_STRINGS.EMPTY),
+    }
+  }),
+})
+
+const _manifest = hydrateManifest(manifest)
 
 /** The scanned manifest — the vite plugin + jest stub always emit one. */
 export const getDocsManifest = (): DocsManifest => _manifest

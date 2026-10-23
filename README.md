@@ -14,8 +14,10 @@ The portal is a two-sided pipeline:
 publishable roots into a manifest (`docs`, `reports`, `src`, `core`, `website`,
 `cms`, `earth`, `docs-exp`, `local-modules`, coverage dirs). `render.mjs` renders
 each file to HTML (markdown via marked, source syntax-highlighted, coverage
-sandboxed). `redact.mjs` scrubs secrets. `docs-portal.mjs` emits the manifest as
-`virtual:docs-manifest` and every file as a lazy `docs-content/<root>/<path>.json`
+sandboxed). `redact.mjs` scrubs secrets. `encode.mjs` compacts the manifest —
+one `strings` table per distinct name/rel-path plus per-node tuples, so
+`docs-portal.mjs` emits `virtual:docs-manifest` ~8× smaller than the scanned
+tree — and every file as a lazy `docs-content/<root>/<path>.json`
 payload — in dev, the identical payloads come from Vite middleware.
 
 **Browser side** (this module) — `<view-docs>` renders the manifest as a
