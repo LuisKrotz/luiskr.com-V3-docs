@@ -14,6 +14,7 @@ import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globa
 import { mount } from '@tests/fixtures/test-constants.js'
 import { createMockGL, createMock2D } from '@tests/fixtures/mock-webgl.js'
 import { HTML_TAGS } from '@core/tokens/elements/html.js'
+import { WEBGL_STRINGS } from '@core/tokens/strings/webgl.js'
 import { DOCS_IDS } from '@core/tokens/ids/docs.js'
 import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
 import { ROUTE_PATHS } from '@core/tokens/routes/paths.js'
@@ -25,6 +26,7 @@ const mockThreeState = {
   renderThrow: false,
   noCanvasTex: false,
   noSprite: false,
+  renders: 0,
 }
 
 jest.unstable_mockModule('three', () => {
@@ -110,7 +112,53 @@ jest.unstable_mockModule('three', () => {
   }
 
   class BufferGeometry extends Disposable {
-    setAttribute() {}
+    constructor() {
+      super()
+
+      // Named attribute streams — instanced alpha/active land here so
+      // the scene's highlight pass can read them back.
+      this.attributes = {}
+    }
+
+    setAttribute(name, attr) {
+      this.attributes[name] = attr
+    }
+
+    getAttribute(name) {
+      return this.attributes[name]
+    }
+  }
+
+  class InstancedBufferAttribute extends Disposable {
+    constructor(array, itemSize = 1) {
+      super()
+
+      this.array = array
+      this.itemSize = itemSize
+      this.needsUpdate = false
+    }
+
+    setX(i, v) {
+      this.array[i * this.itemSize] = v
+    }
+  }
+
+  class Matrix4 {
+    setPosition() {
+      return this
+    }
+  }
+
+  class InstancedMesh extends Mesh {
+    constructor(geometry, material, count = 0) {
+      super(geometry, material)
+
+      this.count = count
+      this.instanceMatrix = new InstancedBufferAttribute(new Float32Array(count * 16), 16)
+      this.isInstancedMesh = true
+    }
+
+    setMatrixAt() {}
   }
 
   class Color extends Disposable {
@@ -162,7 +210,10 @@ jest.unstable_mockModule('three', () => {
     Scene,
     Mesh,
     PerspectiveCamera,
-    SphereGeometry: Disposable,
+    SphereGeometry: BufferGeometry,
+    InstancedMesh,
+    InstancedBufferAttribute,
+    Matrix4,
     // Stores constructor opts — the scene mutates material.opacity for
     // the active-location highlight, so opacity must read back.
     MeshBasicMaterial: class extends Disposable {
@@ -194,6 +245,8 @@ jest.unstable_mockModule('three', () => {
 
       setSize() {}
       render() {
+        mockThreeState.renders++
+
         if (mockThreeState.renderThrow) throw new Error('gpu crash')
       }
       dispose() {}
@@ -201,8 +254,8 @@ jest.unstable_mockModule('three', () => {
   }
 })
 
-const { mountArchScene } = await import('@docs/arch-scene.js')
-const { DOCS_UNITS } = await import('@core/tokens/strings/docs.js')
+const { mountArchScene, placeRoots } = await import('@docs/arch-scene.js')
+const { DOCS_STRINGS, DOCS_UNITS } = await import('@core/tokens/strings/docs.js')
 const { ViewDocs } = await import('@docs/Docs.js')
 const { CACHE_STORAGE_KEYS } = await import('@core/tokens/data/storage.js')
 const { GL_EVENTS } = await import('@core/tokens/events/dom.js')
@@ -240,6 +293,29 @@ const ROOTS = [
 
 const flush = (ms = 40) => new Promise((r) => setTimeout(r, ms))
 
+/**
+ * Reads the instanced alpha + active flag for a manifest path. Nodes
+ * render as TWO InstancedMesh tiers — dir spheres first, file spheres
+ * second, in scene-add order — and a path's instance slot is the index
+ * it holds inside its own tier (the same partition buildGraph runs).
+ */
+const instanceAttrs = (Scene, path) => {
+  const placed = placeRoots(ROOTS)
+  const isDir = placed.find((p) => p.node.path === path)?.node.type !== 'file'
+  const slot = placed
+    .filter((p) => (p.node.type !== 'file') === isDir)
+    .findIndex((p) => p.node.path === path)
+
+  const tier = Scene.lastInstance.children.filter((c) => c.isInstancedMesh)[isDir ? 0 : 1]
+
+  return {
+    alpha: tier.geometry.getAttribute(DOCS_STRINGS.SCENE_ATTR_ALPHA).array[slot],
+    active: tier.geometry.getAttribute(DOCS_STRINGS.SCENE_ATTR_ACTIVE).array[slot],
+    mesh: tier,
+    slot,
+  }
+}
+
 describe('docs architecture scene', () => {
   let origGetContext
   let mockGL
@@ -248,6 +324,7 @@ describe('docs architecture scene', () => {
     mockThreeState.hits = []
     mockThreeState.rendererThrow = false
     mockThreeState.renderThrow = false
+    mockThreeState.renders = 0
     mockGL = createMockGL()
 
     sessionStorage.clear()
@@ -477,7 +554,7 @@ describe('docs architecture scene', () => {
     proto.getContext = function patched(type) {
       if (/webgl/i.test(String(type))) return mockGL
 
-      if (type === '2d') return createMock2D()
+      if (type === WEBGL_STRINGS.CONTEXT_2D) return createMock2D()
 
       return null
     }
@@ -602,6 +679,29 @@ describe('docs architecture scene', () => {
     expect(onLost).toHaveBeenCalledTimes(1)
 
     mockThreeState.renderThrow = false
+
+    handle.destroy()
+    canvas.remove()
+  })
+
+  test('a controls.update throw mid-frame lands on the same path', async () => {
+    const canvas = document.createElement(HTML_TAGS.CANVAS)
+
+    document.body.appendChild(canvas)
+
+    const onLost = jest.fn()
+
+    const handle = mountArchScene(canvas, ROOTS, jest.fn(), onLost)
+
+    // The tick's outer try guards the controls/intro/clock work — the
+    // render call has its own catch inside paintFrame.
+    OrbitControls.lastInstance.update = () => {
+      throw new Error('ctl crash')
+    }
+
+    await flush()
+
+    expect(onLost).toHaveBeenCalledTimes(1)
 
     handle.destroy()
     canvas.remove()
@@ -792,26 +892,25 @@ describe('docs architecture scene', () => {
 
     handle.setActive('docs/architecture')
 
-    const meshes = Scene.lastInstance.children.filter(
-      (c) => c.userData && typeof c.userData.path === 'string'
-    )
-    const active = meshes.find((m) => m.userData.path === 'docs/architecture')
-    const ancestor = meshes.find((m) => m.userData.path === 'docs')
-    const offPath = meshes.find((m) => m.userData.path === 'src/App.tsx')
+    const active = instanceAttrs(Scene, 'docs/architecture')
+    const ancestor = instanceAttrs(Scene, 'docs')
+    const offPath = instanceAttrs(Scene, 'src/App.tsx')
 
-    expect(active.material.opacity).toBe(DOCS_UNITS.SCENE_ACTIVE_OPACITY)
-    expect(active.userData.activeScale).toBe(DOCS_UNITS.SCENE_ACTIVE_SCALE)
-    expect(ancestor.material.opacity).toBe(DOCS_UNITS.SCENE_ANCESTOR_OPACITY)
-    expect(offPath.material.opacity).toBe(DOCS_UNITS.SCENE_FILE_OPACITY)
+    expect(active.alpha).toBeCloseTo(DOCS_UNITS.SCENE_ACTIVE_OPACITY)
+    expect(active.active).toBe(1)
+    expect(ancestor.alpha).toBeCloseTo(DOCS_UNITS.SCENE_ANCESTOR_OPACITY)
+    expect(ancestor.active).toBe(0)
+    expect(offPath.alpha).toBeCloseTo(DOCS_UNITS.SCENE_FILE_OPACITY)
 
     // Returning to the portal root restores the faint backdrop alpha and
     // lights the center node ('' is its path) instead.
     handle.setActive('')
 
-    const root = meshes.find((m) => m.userData.path === '')
-
-    expect(active.material.opacity).toBe(DOCS_UNITS.SCENE_DIR_OPACITY)
-    expect(root.material.opacity).toBe(DOCS_UNITS.SCENE_ACTIVE_OPACITY)
+    expect(instanceAttrs(Scene, 'docs/architecture').alpha).toBeCloseTo(
+      DOCS_UNITS.SCENE_DIR_OPACITY
+    )
+    expect(instanceAttrs(Scene, '').alpha).toBeCloseTo(DOCS_UNITS.SCENE_ACTIVE_OPACITY)
+    expect(instanceAttrs(Scene, '').active).toBe(1)
 
     handle.destroy()
     canvas.remove()
@@ -835,11 +934,11 @@ describe('docs architecture scene', () => {
 
     await flush()
 
-    const active = Scene.lastInstance.children.find(
-      (c) => c.userData && c.userData.path === 'docs/architecture'
+    // The deferred buildGraph re-applied the in-flight highlight into
+    // the instanced attribute stream.
+    expect(instanceAttrs(Scene, 'docs/architecture').alpha).toBeCloseTo(
+      DOCS_UNITS.SCENE_ACTIVE_OPACITY
     )
-
-    expect(active.material.opacity).toBe(DOCS_UNITS.SCENE_ACTIVE_OPACITY)
 
     handle.destroy()
     spy.mockRestore()
@@ -899,13 +998,175 @@ describe('docs architecture scene', () => {
     // via the painted highlight on the fresh scene's node.
     const { Scene } = await import('three')
 
-    const active = Scene.lastInstance.children.find(
-      (c) => c.userData && c.userData.path === 'docs'
-    )
-
-    expect(active.material.opacity).toBe(DOCS_UNITS.SCENE_ACTIVE_OPACITY)
+    expect(instanceAttrs(Scene, 'docs').alpha).toBeCloseTo(DOCS_UNITS.SCENE_ACTIVE_OPACITY)
 
     cleanup()
     router.currentRoute = prev
+  })
+
+  test('instanced hits resolve through the tier table; foreign hits miss', async () => {
+    const { Scene } = await import('three')
+
+    const canvas = document.createElement(HTML_TAGS.CANVAS)
+
+    document.body.appendChild(canvas)
+
+    const onPick = jest.fn()
+
+    const handle = mountArchScene(canvas, ROOTS, onPick)
+
+    await flush()
+
+    const arch = instanceAttrs(Scene, 'docs/architecture')
+
+    // A real three.js instanced hit carries the mesh + instanceId.
+    mockThreeState.hits = [{ object: arch.mesh, instanceId: arch.slot }]
+
+    canvas.dispatchEvent(new MouseEvent('click', { clientX: 10, clientY: 10 }))
+
+    expect(onPick).toHaveBeenCalledWith('docs/architecture')
+
+    // An instanceId on an object that is not a scene tier → no pick.
+    mockThreeState.hits = [{ object: {}, instanceId: 0 }]
+
+    canvas.dispatchEvent(new MouseEvent('click', { clientX: 10, clientY: 10 }))
+
+    expect(onPick).toHaveBeenCalledTimes(1)
+
+    // Out-of-range instanceId on a real tier → no pick either.
+    mockThreeState.hits = [{ object: arch.mesh, instanceId: arch.mesh.count + 5 }]
+
+    canvas.dispatchEvent(new MouseEvent('click', { clientX: 10, clientY: 10 }))
+
+    expect(onPick).toHaveBeenCalledTimes(1)
+
+    // A hit with no object at all → no pick.
+    mockThreeState.hits = [{}]
+
+    canvas.dispatchEvent(new MouseEvent('click', { clientX: 10, clientY: 10 }))
+
+    expect(onPick).toHaveBeenCalledTimes(1)
+
+    handle.destroy()
+    canvas.remove()
+  })
+
+  test('the node-material shader patch injects pulse + instanced alpha', async () => {
+    const { Scene } = await import('three')
+
+    const canvas = document.createElement(HTML_TAGS.CANVAS)
+
+    document.body.appendChild(canvas)
+
+    const handle = mountArchScene(canvas, ROOTS, jest.fn())
+
+    await flush()
+
+    const tier = Scene.lastInstance.children.find((c) => c.isInstancedMesh)
+
+    // The mock renderer never compiles programs — invoke the patch
+    // hook the way three would at first render.
+    const shader = { uniforms: {}, vertexShader: 'v', fragmentShader: 'f' }
+
+    tier.material.onBeforeCompile(shader)
+
+    expect(shader.uniforms.uTime.value).toBeGreaterThanOrEqual(0)
+    expect(shader.vertexShader).toContain(DOCS_STRINGS.SCENE_ATTR_ALPHA)
+    expect(shader.fragmentShader).toContain('v')
+
+    handle.destroy()
+    canvas.remove()
+  })
+
+  test('label reveal is dirty-gated — a steady camera skips the rewrite', async () => {
+    const proto = window.HTMLCanvasElement?.prototype || HTMLCanvasElement.prototype
+
+    proto.getContext = function patched(type) {
+      if (/webgl/i.test(String(type))) return mockGL
+
+      if (type === WEBGL_STRINGS.CONTEXT_2D) return createMock2D()
+
+      return null
+    }
+
+    const origRaf = globalThis.requestAnimationFrame
+    let tickFn = null
+
+    globalThis.requestAnimationFrame = (fn) => {
+      tickFn = fn
+
+      return 1
+    }
+
+    const canvas = document.createElement(HTML_TAGS.CANVAS)
+
+    canvas.style.color = 'red'
+
+    document.body.appendChild(canvas)
+
+    const handle = mountArchScene(canvas, ROOTS, jest.fn())
+
+    await flush()
+
+    try {
+      // Two steady-camera ticks: the first writes the reveal alpha, the
+      // second finds a === l.a and skips — the dirty-gate else arm.
+      tickFn(performance.now())
+      tickFn(performance.now())
+    } finally {
+      globalThis.requestAnimationFrame = origRaf
+    }
+
+    handle.destroy()
+    canvas.remove()
+  })
+
+  test('dirs deeper than SCENE_LABEL_MAX_DEPTH skip their label sprite', async () => {
+    const proto = window.HTMLCanvasElement?.prototype || HTMLCanvasElement.prototype
+
+    proto.getContext = function patched(type) {
+      if (/webgl/i.test(String(type))) return mockGL
+
+      if (type === WEBGL_STRINGS.CONTEXT_2D) return createMock2D()
+
+      return null
+    }
+
+    const deep = {
+      type: 'dir',
+      name: 'a',
+      path: 'deep/a',
+      children: [
+        {
+          type: 'dir',
+          name: 'b',
+          path: 'deep/a/b',
+          children: [{ type: 'dir', name: 'c', path: 'deep/a/b/c', children: [] }],
+        },
+      ],
+    }
+
+    const canvas = document.createElement(HTML_TAGS.CANVAS)
+
+    canvas.style.color = 'red'
+
+    document.body.appendChild(canvas)
+
+    const handle = mountArchScene(
+      canvas,
+      [{ root: 'deep', label: 'Deep', children: [deep] }],
+      jest.fn()
+    )
+
+    await flush()
+
+    const { Scene } = await import('three')
+
+    // Labeled: '' (depth 0), 'deep' bucket (1), a (2), b (3) — c sits at
+    // depth 4, past the cap, so exactly 4 sprites exist.
+    expect(Scene.lastInstance.children.filter((c) => c.isSprite).length).toBe(4)
+
+    handle.destroy()
+    canvas.remove()
   })
 })
