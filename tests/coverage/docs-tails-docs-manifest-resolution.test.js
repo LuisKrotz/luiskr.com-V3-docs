@@ -47,6 +47,28 @@ describe('docs manifest resolution', () => {
     expect(node?.path).toBe('docs/architecture')
   })
 
+  test('case-merged subtrees hydrate their real rel path and id', () => {
+    // 'App/' was merged under 'app/' — the wire carries an explicit rel
+    // override so path and fetch id keep the real casing.
+    const file = resolveDocsPath('src/app/x.ts')
+
+    expect(file?.type).toBe('file')
+    expect(file?.path).toBe('src/App/x.ts')
+    expect(file?.id).toBe('src:App/x.ts')
+
+    const dir = resolveDocsPath('src/app/sub')
+
+    expect(dir?.type).toBe('dir')
+    expect(dir?.path).toBe('src/App/sub')
+
+    // Children under an overridden dir derive from the real parent rel —
+    // they carry no override of their own.
+    const nested = resolveDocsPath('src/app/sub/y.ts')
+
+    expect(nested?.path).toBe('src/App/sub/y.ts')
+    expect(nested?.id).toBe('src:App/sub/y.ts')
+  })
+
   test('unknown segments resolve to null', () => {
     expect(resolveDocsPath('docs/never/there')).toBe(null)
     expect(resolveDocsPath('src/nothing.ts')).toBe(null)

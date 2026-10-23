@@ -96,9 +96,12 @@ describe('ViewDocs — docs portal', () => {
     expect(view.shadowRoot.querySelector('legal-footer')).toBeFalsy()
   })
 
-  test('all docs are headings: tree h2, card h3s + the complete index nav', () => {
+  test('all docs are linked: tree h2, card h3s + the streamed index nav', async () => {
     const $ = (sel) => view.shadowRoot.querySelector(sel)
     const $$ = (sel) => [...view.shadowRoot.querySelectorAll(sel)]
+
+    // The index body streams in over idle slices — flush lets it land.
+    await flush()
 
     // Tree landmark carries an sr-only h2.
     const treeHead = $(`.${DOCS_CLASSES.DOCS_NAV} h2`)
@@ -111,14 +114,15 @@ describe('ViewDocs — docs portal', () => {
     expect(cardHeads.length).toBe(3)
     expect(cardHeads.every((hEl) => hEl.tagName === 'H3' && hEl.querySelector('a'))).toBe(true)
 
-    // The complete index lists every manifest node as a heading link.
+    // The complete index links every manifest node; only dirs carry
+    // headings (the navigable map) — files mount as bare anchors.
     const index = $(`nav[aria-label="${DOCS_STRINGS.INDEX_LABEL}"]`)
 
     expect(index).toBeTruthy()
     expect(index.querySelector('h2').textContent).toBe(DOCS_STRINGS.INDEX_TITLE)
 
-    // 3 buckets + 9 manifest nodes, all as heading links.
-    expect(index.querySelectorAll('a').length).toBe(12)
+    // 3 buckets + 13 manifest nodes — all linked.
+    expect(index.querySelectorAll('a').length).toBe(16)
 
     const heads = [...index.querySelectorAll('h3, h4, h5')]
 
@@ -127,18 +131,29 @@ describe('ViewDocs — docs portal', () => {
         'Documentation',
         'Quality Reports',
         'Source Code',
-        'website.md',
-        'App.tsx',
+        'architecture',
+        'sassdoc',
+        'app',
+        'sub',
       ])
     )
 
-    // Deep nodes sit one heading level under their dir (h4 → h5).
-    const websiteHead = heads.find((hEl) => hEl.textContent === 'website.md')
+    // Deep dirs sit one heading level under their parent (h4 → h5);
+    // files are anchors under the preceding dir heading, not headings.
+    const subHead = heads.find((hEl) => hEl.textContent === 'sub')
 
-    expect(websiteHead.tagName).toBe('H5')
+    expect(subHead.tagName).toBe('H5')
+
+    const fileLink = [...index.querySelectorAll('a')].find((a) => a.textContent === 'website.md')
+
+    expect(fileLink).toBeTruthy()
+    expect(fileLink.closest('h3,h4,h5,h6')).toBeFalsy()
   })
 
   test('index links route through navigateDocs; modified clicks keep native semantics', async () => {
+    // The index body streams in over idle slices — flush lets it land.
+    await flush()
+
     const index = view.shadowRoot.querySelector(`nav[aria-label="${DOCS_STRINGS.INDEX_LABEL}"]`)
 
     const link = [...index.querySelectorAll('a')].find((a) => a.textContent === 'website.md')

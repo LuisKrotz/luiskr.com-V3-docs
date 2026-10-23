@@ -16,13 +16,14 @@ import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
 import { DOCS_IDS } from '@core/tokens/ids/docs.js'
 import { ROUTE_PATHS } from '@core/tokens/routes/paths.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
-import { DOCS_STRINGS } from '@core/tokens/strings/docs.js'
+import { DOCS_STRINGS, DOCS_UNITS } from '@core/tokens/strings/docs.js'
+import { TYPE_STRINGS } from '@core/tokens/strings/types.js'
 import { h } from '@core/jsx.js'
 import { isPlainClick } from '@core/utils/dom.js'
 import { folderSvg } from './folder-svg.js'
 import { crumbsForPath, getDocsManifest } from './manifest.js'
 import type { ViewDocs } from './Docs.js'
-import type { DocsNode } from './manifest.js'
+import type { DocsNode, DocsRoot } from './manifest.js'
 
 /**
  * Absolute `/docs` route for a manifest-relative path — the canonical URL
@@ -131,12 +132,17 @@ const gridCards = (view: ViewDocs, nodes: DocsNode[]): HTMLElement[] =>
 // ─── Complete document index ─────────────────────────────────────────────────
 // The manifest is static per build, so the index DOM is built once and the
 // same node is re-attached on every render — the links delegate to whatever
-// view instance rendered last via `_indexView`.
+// view instance rendered last via `_indexView`. Every manifest node stays
+// linked — dirs carry the headings (the navigable map) while files mount
+// as bare anchors: a heading per document made the map itself unusable
+// (~8k headings) and the element count is what was stalling the page. The
+// tree streams into the nav over idle slices so the multi-thousand-node
+// attach never lands inside a render or input task.
 
 /** The view the memoized index links delegate navigation to. */
 let _indexView: ViewDocs | null = null
 
-/** The built-once index subtree (all ~3.5k manifest nodes as headings). */
+/** The built-once index subtree (all manifest nodes as heading/link rows). */
 let _indexEl: HTMLElement | null = null
 
 /**
@@ -162,28 +168,107 @@ const indexLink = (node: DocsNode): HTMLElement =>
   ) as HTMLElement
 
 /**
- * Recursive index nodes — every manifest node becomes a heading wrapping
- * its canonical link. Heading level is 3 + depth capped at h6, so the
- * ladder mirrors the tree (bucket h3 → h4 → h5 → h6 for deep branches).
+ * Recursive index entries — dirs yield a heading wrapping their canonical
+ * link (level 3 + depth capped at h6, so the ladder mirrors the tree:
+ * bucket h3 → h4 → h5 → h6), files yield the bare anchor. The links land
+ * in document order directly under the nav: each file's anchor reads as
+ * belonging to the preceding dir heading, keeping every document reachable
+ * from both the AX tree and crawlers without a heading per file.
  * @param nodes The manifest nodes at this depth.
  * @param depth 1-based depth below the bucket heading.
- * @returns Flat heading list in document order.
+ * @yields Heading elements (dirs) and anchor elements (files) in order.
  */
-const indexNodes = (nodes: DocsNode[], depth: number): HTMLElement[] =>
-  nodes.flatMap((node) => {
-    const heading = h(`h${Math.min(3 + depth, 6)}`, null, indexLink(node)) as HTMLElement
+function* indexNodes(nodes: DocsNode[], depth: number): Generator<HTMLElement> {
+  for (const node of nodes) {
+    if (node.type === 'dir') {
+      yield h(`h${Math.min(3 + depth, 6)}`, null, indexLink(node)) as HTMLElement
 
-    const kids =
-      node.type === 'dir' && node.children?.length ? indexNodes(node.children, depth + 1) : []
+      if (node.children?.length) yield* indexNodes(node.children, depth + 1)
+    } else {
+      yield indexLink(node)
+    }
+  }
+}
 
-    return [heading, ...kids]
-  })
+/**
+ * Streams the root buckets + their subtrees — h3 bucket links first, then
+ * each root's nodes in document order. Generator shape per the
+ * self-similar-traversal rule; the puller controls pacing.
+ * @param roots The manifest roots.
+ * @yields Index elements in document order.
+ */
+function* indexEntries(roots: DocsRoot[]): Generator<HTMLElement> {
+  for (const root of roots) {
+    yield h(
+      'h3',
+      null,
+      h(
+        'a',
+        {
+          href: docsHref(root.root),
+          onClick: (e: Event) => {
+            if (!isPlainClick(e)) return
+
+            e.preventDefault()
+
+            _indexView?.navigateDocs(root.root)
+          },
+        },
+        root.label
+      )
+    ) as HTMLElement
+
+    yield* indexNodes(root.children, 1)
+  }
+}
+
+/**
+ * Schedules one index slice in the next idle gap — requestIdleCallback
+ * with a starvation bound where it exists, a bare setTimeout otherwise.
+ * The timeout guarantees the tree completes even on a continuously busy
+ * main thread.
+ * @param cb The slice to run.
+ */
+const scheduleIndexSlice = (cb: () => void): void => {
+  if (
+    typeof window !== TYPE_STRINGS.UNDEFINED &&
+    typeof window.requestIdleCallback === TYPE_STRINGS.FUNCTION
+  ) {
+    window.requestIdleCallback(cb, { timeout: DOCS_UNITS.INDEX_IDLE_TIMEOUT })
+  } else {
+    setTimeout(cb, DOCS_UNITS.INDEX_FALLBACK_DELAY)
+  }
+}
+
+/**
+ * Pulls INDEX_CHUNK elements per slice into the live nav — each slice is
+ * a few ms of createElement+append, far under a frame budget, and the
+ * generator's laziness means only the streamed prefix ever exists. Runs
+ * to completion regardless of view lifetime: the element is memoized
+ * module-level and re-attaches on the next render.
+ * @param gen The index element stream.
+ * @param nav The index nav being filled.
+ */
+const pumpIndex = (gen: Generator<HTMLElement>, nav: HTMLElement): void => {
+  for (let i = 0; i < DOCS_UNITS.INDEX_CHUNK; i++) {
+    const next = gen.next()
+
+    if (next.done) return
+
+    nav.appendChild(next.value)
+  }
+
+  scheduleIndexSlice(() => pumpIndex(gen, nav))
+}
 
 /**
  * The complete document index — an sr-only nav listing every manifest node
- * as a heading link so AT heading navigation and agents can reach all docs
- * without unfolding the tree. Built once (manifest is static), re-attached
- * on subsequent renders; real DOM so crawlers index it.
+ * (dirs as heading links, files as bare anchors) so AT heading navigation
+ * gets the tree's shape and link navigation/crawlers/agents reach all docs
+ * without unfolding the tree. The nav shell mounts synchronously; the
+ * ~8k-node body streams in over idle slices so first paint and input
+ * tasks never pay the full attach. Memoized — re-attached on subsequent
+ * renders; real DOM so crawlers index it.
  * @param view The host view (links delegate navigation to it).
  * @returns The memoized index nav element.
  */
@@ -197,29 +282,10 @@ const docsIndex = (view: ViewDocs): HTMLElement => {
         className: A11Y_CLASSES.SR_ONLY,
         'aria-label': DOCS_STRINGS.INDEX_LABEL,
       },
-      h('h2', null, DOCS_STRINGS.INDEX_TITLE),
-      ...getDocsManifest().roots.flatMap((root) => [
-        h(
-          'h3',
-          null,
-          h(
-            'a',
-            {
-              href: docsHref(root.root),
-              onClick: (e: Event) => {
-                if (!isPlainClick(e)) return
-
-                e.preventDefault()
-
-                _indexView?.navigateDocs(root.root)
-              },
-            },
-            root.label
-          )
-        ) as HTMLElement,
-        ...indexNodes(root.children, 1),
-      ])
+      h('h2', null, DOCS_STRINGS.INDEX_TITLE)
     ) as HTMLElement
+
+    scheduleIndexSlice(() => pumpIndex(indexEntries(getDocsManifest().roots), _indexEl!))
   }
 
   return _indexEl
