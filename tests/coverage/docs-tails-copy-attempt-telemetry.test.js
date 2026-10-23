@@ -117,6 +117,14 @@ describe('copy-attempt telemetry', () => {
     globalThis.gtag = gtag
     globalThis.fetch = jest.fn(async () => ({}))
 
+    // happy-dom ships a real sendBeacon — decline it so the fan-out
+    // section past the transport return is reached.
+    Object.defineProperty(globalThis.navigator, 'sendBeacon', {
+      value: () => false,
+      configurable: true,
+      writable: true,
+    })
+
     trackCopyAttempt('contextmenu', 'src/App.tsx')
 
     expect(gtag).toHaveBeenCalledWith('event', DOCS_STRINGS.EVENT_COPY_ATTEMPT, {

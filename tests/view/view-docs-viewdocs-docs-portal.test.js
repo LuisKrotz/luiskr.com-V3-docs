@@ -44,6 +44,7 @@ describe('ViewDocs — docs portal', () => {
   let pushSpy
   let origRoute
   let origFetch
+  let origBeacon
   let pushed
 
   const flush = () => new Promise((r) => setTimeout(r, 0))
@@ -52,6 +53,16 @@ describe('ViewDocs — docs portal', () => {
     origRoute = router.currentRoute
     origFetch = globalThis.fetch
     pushed = []
+
+    // happy-dom's navigator ships a working sendBeacon — the telemetry
+    // transport prefers it over fetch, so pin a declining stub to keep
+    // assertions on the fetch keepalive path.
+    origBeacon = navigator.sendBeacon
+    Object.defineProperty(navigator, 'sendBeacon', {
+      value: () => false,
+      configurable: true,
+      writable: true,
+    })
 
     pushSpy = jest.spyOn(router, 'push').mockImplementation(async (p) => {
       pushed.push(p)
@@ -75,6 +86,11 @@ describe('ViewDocs — docs portal', () => {
 
     router.currentRoute = origRoute
     globalThis.fetch = origFetch
+    Object.defineProperty(navigator, 'sendBeacon', {
+      value: origBeacon,
+      configurable: true,
+      writable: true,
+    })
   })
 
   test('registers as a custom element', () => {
