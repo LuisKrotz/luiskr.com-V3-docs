@@ -59,6 +59,60 @@ interface LabelRef {
   sprite: THREE.Sprite
   material: THREE.SpriteMaterial
   depth: number
+  /** Last written alpha — opacity writes and visibility flips are dirty-gated. */
+  a: number
+}
+
+/**
+ * three.js GLSL anchors the instanced-node materials patch — chunk-include
+ * names are the stable seam inside three's generated programs.
+ */
+const GLSL_BEGIN_VERTEX = '#include <begin_vertex>'
+const GLSL_COLOR_FRAGMENT = '#include <color_fragment>'
+
+/**
+ * Instanced-node shader contract — the ambient pulse and the
+ * active-node scale run entirely in the vertex stage so the scene's
+ * ~7k nodes cost two draw calls and ZERO per-frame CPU writes:
+ *
+ *   transformed *= (1 + sin(uTime·SPEED + gl_InstanceID·PHASE) · AMP)
+ *                · (1 + aActive · (SCENE_ACTIVE_SCALE − 1))
+ *
+ * `aAlpha` carries the per-node opacity (base / ancestor / active),
+ * `aActive` the 0/1 active flag — both are instanced attributes written
+ * only when the highlight path changes, never per frame.
+ */
+/** Instanced-attribute names shared by the geometry buffers and the GLSL. */
+const ATTR_A_ALPHA = DOCS_STRINGS.SCENE_ATTR_ALPHA
+const ATTR_A_ACTIVE = DOCS_STRINGS.SCENE_ATTR_ACTIVE
+
+const instancedVertexPreamble = `uniform float uTime;\nattribute float ${ATTR_A_ALPHA};\nattribute float ${ATTR_A_ACTIVE};\nvarying float vAlpha;\n`
+
+const instancedVertexPulse =
+  `${GLSL_BEGIN_VERTEX}\n` +
+  `transformed *= (1.0 + sin(uTime * ${DOCS_UNITS.SCENE_PULSE_SPEED} + float(gl_InstanceID) * 0.7) * ${DOCS_UNITS.SCENE_PULSE_AMP}) * (1.0 + ${ATTR_A_ACTIVE} * ${DOCS_UNITS.SCENE_ACTIVE_SCALE - 1.0});\n` +
+  `vAlpha = ${ATTR_A_ALPHA};\n`
+
+const instancedFragmentPreamble = 'varying float vAlpha;\n'
+
+const instancedFragmentAlpha = `${GLSL_COLOR_FRAGMENT}\ndiffuseColor.a *= vAlpha;\n`
+
+/**
+ * Patches a node material so the pulse scale and per-instance alpha run
+ * in-shader: `uTime` is the shared clock, `aAlpha`/`aActive` are the
+ * instanced attribute streams the highlight pass rewrites on demand.
+ */
+const patchNodeMaterial = (mat: THREE.MeshBasicMaterial, pulseTime: { value: number }): void => {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = pulseTime
+
+    shader.vertexShader =
+      instancedVertexPreamble + shader.vertexShader.replace(GLSL_BEGIN_VERTEX, instancedVertexPulse)
+
+    shader.fragmentShader =
+      instancedFragmentPreamble +
+      shader.fragmentShader.replace(GLSL_COLOR_FRAGMENT, instancedFragmentAlpha)
+  }
 }
 
 /**
@@ -347,6 +401,9 @@ export const mountArchSceneThree = (
 
   const controls = new OrbitControls(camera, canvas)
 
+  // Reduced-motion viewers never reach this scene — webglAllowed()
+  // refuses the context upstream, so the map stays the static DOM
+  // index for them rather than a half-gated canvas.
   controls.enableDamping = true
   controls.autoRotate = true
   controls.autoRotateSpeed = DOCS_UNITS.SCENE_ROTATE_SPEED
@@ -411,9 +468,28 @@ export const mountArchSceneThree = (
 
   scene.add(new THREE.AmbientLight(0xffffff, 1))
 
-  const pickables: THREE.Mesh[] = []
-
   const labels: LabelRef[] = []
+
+  /**
+   * Node draw calls — every dir sphere renders through ONE InstancedMesh,
+   * every file sphere through another, so the multi-thousand-node graph
+   * costs two draws instead of one call per node (plus the line set and
+   * the revealed labels). Weak GPUs/tablets keep their frame budget.
+   */
+  let dirMesh: THREE.InstancedMesh | null = null
+
+  let fileMesh: THREE.InstancedMesh | null = null
+
+  /** placed[] index per instance slot — a raycast instanceId resolves to a node. */
+  const dirPlaced: number[] = []
+
+  const filePlaced: number[] = []
+
+  /** Mesh → its placed-index table, so a raycast hit maps back to a path. */
+  const pickTables = new Map<THREE.Object3D, number[]>()
+
+  /** Shared pulse clock — patched into both node materials' shaders. */
+  const pulseTime = { value: 0 }
 
   /** Edge geometry — assigned inside buildGraph, disposed in destroy(). */
   let lineGeo: THREE.BufferGeometry | null = null
@@ -424,31 +500,49 @@ export const mountArchSceneThree = (
   let disposed = false
 
   /**
-   * Paints the active-location highlight onto live nodes: the exact path
-   * match pops to SCENE_ACTIVE_OPACITY with a larger pulse scale, and
-   * ancestor dirs on its branch lift to SCENE_ANCESTOR_OPACITY so the
-   * route's lineage reads on the map. Everything else keeps the faint
-   * backdrop alpha stored on userData at build time.
+   * Rewrites one tier's instanced attributes for the active location:
+   * the exact path match pops to SCENE_ACTIVE_OPACITY with the larger
+   * pulse scale (aActive=1), and ancestor dirs on its branch lift to
+   * SCENE_ANCESTOR_OPACITY so the route's lineage reads on the map.
+   * Everything else keeps the faint backdrop alpha for its tier.
    */
-  const applyActive = () => {
-    pickables.forEach((m) => {
-      const p = m.userData.path as string
+  const writeActive = (
+    mesh: THREE.InstancedMesh | null,
+    idxs: number[],
+    baseOpacity: number
+  ): void => {
+    if (!mesh) return
+
+    const alpha = mesh.geometry.getAttribute(ATTR_A_ALPHA) as THREE.InstancedBufferAttribute
+    const act = mesh.geometry.getAttribute(ATTR_A_ACTIVE) as THREE.InstancedBufferAttribute
+
+    idxs.forEach((pi, k) => {
+      const p = placed[pi].node.path
 
       const isActive = p === activePath
 
       const isAncestor =
         !isActive && p !== CHAR_STRINGS.EMPTY && activePath.startsWith(`${p}${CHAR_STRINGS.SLASH}`)
 
-      const mat = m.material as THREE.MeshBasicMaterial
+      alpha.setX(
+        k,
+        isActive
+          ? DOCS_UNITS.SCENE_ACTIVE_OPACITY
+          : isAncestor
+            ? DOCS_UNITS.SCENE_ANCESTOR_OPACITY
+            : baseOpacity
+      )
 
-      mat.opacity = isActive
-        ? DOCS_UNITS.SCENE_ACTIVE_OPACITY
-        : isAncestor
-          ? DOCS_UNITS.SCENE_ANCESTOR_OPACITY
-          : (m.userData.baseOpacity as number)
-
-      m.userData.activeScale = isActive ? DOCS_UNITS.SCENE_ACTIVE_SCALE : 1
+      act.setX(k, isActive ? 1 : 0)
     })
+
+    alpha.needsUpdate = true
+    act.needsUpdate = true
+  }
+
+  const applyActive = () => {
+    writeActive(dirMesh, dirPlaced, DOCS_UNITS.SCENE_DIR_OPACITY)
+    writeActive(fileMesh, filePlaced, DOCS_UNITS.SCENE_FILE_OPACITY)
   }
 
   // Context loss mid-flight: stop the loop, tell the host to switch to
@@ -471,6 +565,8 @@ export const mountArchSceneThree = (
 
     const positions: THREE.Vector3[] = []
 
+    // Partition nodes into the two instance tiers; labels still key off
+    // the world position of their dir.
     placed.forEach(({ node, depth }, i) => {
       const pos = new THREE.Vector3(xyz[i * 3], xyz[i * 3 + 1], xyz[i * 3 + 2])
 
@@ -480,47 +576,79 @@ export const mountArchSceneThree = (
 
       positions.push(pos)
 
-      const isDir = node.type !== 'file'
+      if (node.type !== 'file') {
+        dirPlaced.push(i)
+      } else {
+        filePlaced.push(i)
+      }
+    })
 
-      const geo = new THREE.SphereGeometry(
-        isDir ? DOCS_UNITS.SCENE_DIR_RADIUS : DOCS_UNITS.SCENE_FILE_RADIUS,
-        12,
-        12
+    const m4 = new THREE.Matrix4()
+
+    /**
+     * Builds one instanced tier — shared sphere geometry, one material,
+     * static instance matrices, and the two instanced attribute streams
+     * (alpha / active) the highlight pass owns.
+     */
+    const buildTier = (
+      radius: number,
+      baseOpacity: number,
+      idxs: number[]
+    ): THREE.InstancedMesh => {
+      const geo = new THREE.SphereGeometry(radius, 12, 12)
+
+      const mat = new THREE.MeshBasicMaterial({ color: inkColor, transparent: true })
+
+      patchNodeMaterial(mat, pulseTime)
+
+      const mesh = new THREE.InstancedMesh(geo, mat, idxs.length)
+
+      geo.setAttribute(
+        ATTR_A_ALPHA,
+        new THREE.InstancedBufferAttribute(new Float32Array(idxs.length).fill(baseOpacity), 1)
       )
 
-      const mat = new THREE.MeshBasicMaterial({
-        color: inkColor,
-        transparent: true,
-        opacity: isDir ? DOCS_UNITS.SCENE_DIR_OPACITY : DOCS_UNITS.SCENE_FILE_OPACITY,
+      geo.setAttribute(
+        ATTR_A_ACTIVE,
+        new THREE.InstancedBufferAttribute(new Float32Array(idxs.length), 1)
+      )
+
+      idxs.forEach((pi, k) => {
+        m4.setPosition(positions[pi])
+
+        mesh.setMatrixAt(k, m4)
       })
 
-      const mesh = new THREE.Mesh(geo, mat)
-
-      mesh.position.copy(pos)
-
-      mesh.userData.path = node.path
-
-      mesh.userData.baseOpacity = mat.opacity
-
-      // Neutral pulse multiplier until applyActive() marks it.
-      mesh.userData.activeScale = 1
+      mesh.instanceMatrix.needsUpdate = true
 
       scene.add(mesh)
 
-      pickables.push(mesh)
+      pickTables.set(mesh, idxs)
 
-      if (isDir) {
-        const label = makeLabel(node.name, ink)
+      return mesh
+    }
 
-        if (label) {
-          label.sprite.position.copy(pos)
+    dirMesh = buildTier(DOCS_UNITS.SCENE_DIR_RADIUS, DOCS_UNITS.SCENE_DIR_OPACITY, dirPlaced)
 
-          label.sprite.position.y += DOCS_UNITS.LABEL_LIFT_Y
+    fileMesh = buildTier(DOCS_UNITS.SCENE_FILE_RADIUS, DOCS_UNITS.SCENE_FILE_OPACITY, filePlaced)
 
-          scene.add(label.sprite)
+    placed.forEach(({ node, depth }, i) => {
+      if (node.type === 'file' || depth > DOCS_UNITS.SCENE_LABEL_MAX_DEPTH) return
 
-          labels.push({ ...label, depth: placed[i].depth })
-        }
+      const label = makeLabel(node.name, ink)
+
+      if (label) {
+        label.sprite.position.copy(positions[i])
+
+        label.sprite.position.y += DOCS_UNITS.LABEL_LIFT_Y
+
+        // Labels start hidden — the reveal pass flips visibility when
+        // the camera is close enough for the name to read.
+        label.sprite.visible = false
+
+        scene.add(label.sprite)
+
+        labels.push({ ...label, depth, a: -1 })
       }
     })
 
@@ -577,6 +705,26 @@ export const mountArchSceneThree = (
     downY = e.clientY
   }
 
+  /**
+   * Resolves a raycast hit to a manifest path. Instanced hits carry
+   * `instanceId` — it indexes the tier's placed table; a hit without an
+   * instanceId (older three paths, test doubles) falls back to the
+   * object userData contract the pre-instanced scene used.
+   */
+  const pathForHit = (hit?: THREE.Intersection): string | undefined => {
+    if (!hit) return undefined
+
+    const inst = hit.instanceId
+
+    if (typeof inst !== 'number') return hit.object?.userData?.path as string | undefined
+
+    const idxs = pickTables.get(hit.object)
+
+    const pi = idxs?.[inst]
+
+    return pi === undefined ? undefined : placed[pi].node.path
+  }
+
   const onClick = (e: MouseEvent) => {
     if (
       Math.abs(e.clientX - downX) > DOCS_UNITS.TAP_SLOP_PX ||
@@ -594,9 +742,11 @@ export const mountArchSceneThree = (
 
     raycaster.setFromCamera(pointer, camera)
 
-    const hit = raycaster.intersectObjects(pickables)[0]
+    const pickTargets = [dirMesh, fileMesh].filter((m): m is THREE.InstancedMesh => m !== null)
 
-    const path = hit?.object?.userData?.path
+    const hit = raycaster.intersectObjects(pickTargets)[0]
+
+    const path = pathForHit(hit)
 
     if (typeof path === TYPE_STRINGS.STRING && path) onPick(path)
   }
@@ -614,6 +764,46 @@ export const mountArchSceneThree = (
     camera.aspect = w / h
 
     camera.updateProjectionMatrix()
+  }
+
+  /**
+   * One frame: zoom-reveal label pass + renderer.render. Returns false
+   * when the GPU/driver threw — the caller treats it exactly like a
+   * context loss (the host rebuilds on restore).
+   */
+  const paintFrame = (): boolean => {
+    try {
+      const dist = controls.getDistance()
+
+      labels.forEach((l) => {
+        const reveal = Math.max(
+          DOCS_UNITS.LABEL_REVEAL_MIN,
+          DOCS_UNITS.LABEL_REVEAL_BASE - l.depth * DOCS_UNITS.LABEL_DEPTH_STEP
+        )
+
+        const a = Math.max(0, Math.min(1, (reveal - dist) / DOCS_UNITS.LABEL_FADE))
+
+        if (a !== l.a) {
+          l.material.opacity = a
+
+          l.sprite.visible = a > 0
+
+          l.a = a
+        }
+      })
+
+      renderer.render(scene, camera)
+
+      return true
+    } catch (err) {
+      // A crashed renderer/driver throw takes the same path as a real
+      // context loss — mark dead, let the host recover.
+      devWarn('docs arch-scene tick failed', err)
+
+      onContextLost()
+
+      return false
+    }
   }
 
   resize()
@@ -638,44 +828,18 @@ export const mountArchSceneThree = (
         scene.rotation.y = introFrom * Math.pow(1 - k, 3)
       }
 
-      // Slow node pulse — organic breathing on the instance scale, cheap
-      // per-frame uniform-style math (a scale set, not geometry churn).
-      // The active node gets SCENE_ACTIVE_SCALE on top so it reads as
-      // the current location even while breathing.
-      const t = (performance.now() - t0) / 1000
-
-      pickables.forEach((m, i) => {
-        const s =
-          (1 + Math.sin(t * DOCS_UNITS.SCENE_PULSE_SPEED + i * 0.7) * DOCS_UNITS.SCENE_PULSE_AMP) *
-          (m.userData.activeScale as number)
-
-        m.scale.setScalar(s)
-      })
-
-      // Zoom-reveal for folder labels: shallower rings name themselves
-      // first, deeper rings need a closer camera — so the viewer always
-      // knows which folder it is hovering inside of.
-      const dist = controls.getDistance()
-
-      labels.forEach(({ material, depth }) => {
-        const reveal = Math.max(
-          DOCS_UNITS.LABEL_REVEAL_MIN,
-          DOCS_UNITS.LABEL_REVEAL_BASE - depth * DOCS_UNITS.LABEL_DEPTH_STEP
-        )
-
-        material.opacity = Math.max(0, Math.min(1, (reveal - dist) / DOCS_UNITS.LABEL_FADE))
-      })
-
-      renderer.render(scene, camera)
+      // Slow node pulse — the breathing runs in the vertex shader off
+      // the shared clock; the CPU only feeds it the time uniform.
+      pulseTime.value = (performance.now() - t0) / 1000
     } catch (err) {
-      // A crashed renderer/driver throw takes the same path as a real
-      // context loss — mark dead, let the host recover.
       devWarn('docs arch-scene tick failed', err)
 
       onContextLost()
 
       return
     }
+
+    if (!paintFrame()) return
 
     raf = requestAnimationFrame(tick)
   }
@@ -703,10 +867,16 @@ export const mountArchSceneThree = (
 
       controls.dispose()
 
-      pickables.forEach((m) => {
+      // InstancedMesh.dispose() releases the instance-matrix buffer; the
+      // shared geometry (position + instanced attrs) and material follow.
+      ;[dirMesh, fileMesh].forEach((m) => {
+        if (!m) return
+
         m.geometry.dispose()
 
         ;(m.material as THREE.Material).dispose()
+
+        m.dispose()
       })
 
       labels.forEach(({ material }) => {

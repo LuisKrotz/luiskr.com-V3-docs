@@ -97,7 +97,51 @@ jest.unstable_mockModule('three', () => {
   }
 
   class BufferGeometry extends Disposable {
-    setAttribute() {}
+    constructor() {
+      super()
+
+      this.attributes = {}
+    }
+
+    setAttribute(name, attr) {
+      this.attributes[name] = attr
+    }
+
+    getAttribute(name) {
+      return this.attributes[name]
+    }
+  }
+
+  class InstancedBufferAttribute extends Disposable {
+    constructor(array, itemSize = 1) {
+      super()
+
+      this.array = array
+      this.itemSize = itemSize
+      this.needsUpdate = false
+    }
+
+    setX(i, v) {
+      this.array[i * this.itemSize] = v
+    }
+  }
+
+  class Matrix4 {
+    setPosition() {
+      return this
+    }
+  }
+
+  class InstancedMesh extends Mesh {
+    constructor(geometry, material, count = 0) {
+      super(geometry, material)
+
+      this.count = count
+      this.instanceMatrix = new InstancedBufferAttribute(new Float32Array(count * 16), 16)
+      this.isInstancedMesh = true
+    }
+
+    setMatrixAt() {}
   }
 
   class Color extends Disposable {
@@ -140,7 +184,10 @@ jest.unstable_mockModule('three', () => {
     Scene,
     Mesh,
     PerspectiveCamera,
-    SphereGeometry: Disposable,
+    SphereGeometry: BufferGeometry,
+    InstancedMesh,
+    InstancedBufferAttribute,
+    Matrix4,
     MeshBasicMaterial: class extends Disposable {
       constructor(opts = {}) {
         super()
