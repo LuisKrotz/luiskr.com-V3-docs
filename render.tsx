@@ -9,7 +9,9 @@
 
 import { A11Y_CLASSES } from '@core/tokens/classes/a11y.js'
 import { ARIA_ATTRS } from '@core/tokens/attrs/aria.js'
+import { ATTR_VALUES } from '@core/tokens/attrs/values.js'
 import { DATA_ATTRS } from '@core/tokens/attrs/data.js'
+import { HTML_TAGS } from '@core/tokens/elements/html.js'
 import { FORM_ATTRS } from '@core/tokens/attrs/form.js'
 import { MICRODATA_ATTRS, MICRODATA_VALUES } from '@core/tokens/attrs/microdata.js'
 import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
@@ -131,13 +133,20 @@ const gridCards = (view: ViewDocs, nodes: DocsNode[]): HTMLElement[] =>
 
 // ─── Complete document index ─────────────────────────────────────────────────
 // The manifest is static per build, so the index DOM is built once and the
-// same node is re-attached on every render — the links delegate to whatever
-// view instance rendered last via `_indexView`. Every manifest node stays
-// linked — dirs carry the headings (the navigable map) while files mount
-// as bare anchors: a heading per document made the map itself unusable
-// (~8k headings) and the element count is what was stalling the page. The
-// tree streams into the nav over idle slices so the multi-thousand-node
-// attach never lands inside a render or input task.
+// same node is re-attached on every render. Every manifest node stays linked —
+// dirs carry the headings (the navigable map) while files mount as bare
+// anchors: a heading per document made the map itself unusable (~8k headings).
+// Perf shape, end to end:
+//  - Anchors carry `data-path` and ONE delegated click listener lives on the
+//    nav — ~8k per-node closures/listeners never exist.
+//  - `tabindex="-1"` keeps the thousands of index links out of sequential tab
+//    order (AT still enumerates them via headings/links lists and the virtual
+//    cursor; Tab through them would be unusable).
+//  - Slices append into a detached DocumentFragment and the fragment attaches
+//    ONCE — no live-DOM style/layout is paid per slice, and the finished nav
+//    is `content-visibility: auto` parked offscreen, so the subtree stays in
+//    the AX tree + DOM for AT/crawlers while style/layout/paint are skipped
+//    permanently.
 
 /** The view the memoized index links delegate navigation to. */
 let _indexView: ViewDocs | null = null
@@ -147,24 +156,21 @@ let _indexEl: HTMLElement | null = null
 
 /**
  * Index link for one manifest node — a real /docs/<path> anchor (crawlable,
- * new-tab friendly) that stays on the SPA router for plain clicks.
- * @param node The manifest node to link.
+ * new-tab friendly) carrying its path for the nav's delegated click handler.
+ * `tabindex="-1"` keeps it out of sequential focus (see block comment).
+ * @param path Manifest-relative path the link navigates to.
+ * @param label Anchor text (node name / bucket label).
  * @returns The anchor element.
  */
-const indexLink = (node: DocsNode): HTMLElement =>
+const indexLink = (path: string, label: string): HTMLElement =>
   h(
     'a',
     {
-      href: docsHref(node.path),
-      onClick: (e: Event) => {
-        if (!isPlainClick(e)) return
-
-        e.preventDefault()
-
-        _indexView?.navigateDocs(node.path)
-      },
+      href: docsHref(path),
+      tabindex: ATTR_VALUES.NEGATIVE_TABINDEX,
+      ...{ [DATA_ATTRS.DATA_PATH]: path },
     },
-    node.name
+    label
   ) as HTMLElement
 
 /**
@@ -181,11 +187,11 @@ const indexLink = (node: DocsNode): HTMLElement =>
 function* indexNodes(nodes: DocsNode[], depth: number): Generator<HTMLElement> {
   for (const node of nodes) {
     if (node.type === 'dir') {
-      yield h(`h${Math.min(3 + depth, 6)}`, null, indexLink(node)) as HTMLElement
+      yield h(`h${Math.min(3 + depth, 6)}`, null, indexLink(node.path, node.name)) as HTMLElement
 
       if (node.children?.length) yield* indexNodes(node.children, depth + 1)
     } else {
-      yield indexLink(node)
+      yield indexLink(node.path, node.name)
     }
   }
 }
@@ -199,24 +205,7 @@ function* indexNodes(nodes: DocsNode[], depth: number): Generator<HTMLElement> {
  */
 function* indexEntries(roots: DocsRoot[]): Generator<HTMLElement> {
   for (const root of roots) {
-    yield h(
-      'h3',
-      null,
-      h(
-        'a',
-        {
-          href: docsHref(root.root),
-          onClick: (e: Event) => {
-            if (!isPlainClick(e)) return
-
-            e.preventDefault()
-
-            _indexView?.navigateDocs(root.root)
-          },
-        },
-        root.label
-      )
-    ) as HTMLElement
+    yield h('h3', null, indexLink(root.root, root.label)) as HTMLElement
 
     yield* indexNodes(root.children, 1)
   }
@@ -241,24 +230,31 @@ const scheduleIndexSlice = (cb: () => void): void => {
 }
 
 /**
- * Pulls INDEX_CHUNK elements per slice into the live nav — each slice is
- * a few ms of createElement+append, far under a frame budget, and the
- * generator's laziness means only the streamed prefix ever exists. Runs
- * to completion regardless of view lifetime: the element is memoized
+ * Pulls INDEX_CHUNK elements per slice into a DETACHED DocumentFragment —
+ * each slice is pure createElement work with zero style/layout cost since
+ * the fragment is not connected. On completion the whole tree attaches to
+ * the nav in ONE insertion, so the multi-thousand-node layout pass happens
+ * once (and with the nav's content-visibility skip, barely even then).
+ * Runs to completion regardless of view lifetime: the element is memoized
  * module-level and re-attaches on the next render.
  * @param gen The index element stream.
- * @param nav The index nav being filled.
+ * @param nav The index nav the finished fragment attaches to.
+ * @param frag Detached fragment accumulating nodes between slices.
  */
-const pumpIndex = (gen: Generator<HTMLElement>, nav: HTMLElement): void => {
+const pumpIndex = (gen: Generator<HTMLElement>, nav: HTMLElement, frag: DocumentFragment): void => {
   for (let i = 0; i < DOCS_UNITS.INDEX_CHUNK; i++) {
     const next = gen.next()
 
-    if (next.done) return
+    if (next.done) {
+      nav.appendChild(frag)
 
-    nav.appendChild(next.value)
+      return
+    }
+
+    frag.appendChild(next.value)
   }
 
-  scheduleIndexSlice(() => pumpIndex(gen, nav))
+  scheduleIndexSlice(() => pumpIndex(gen, nav, frag))
 }
 
 /**
@@ -279,13 +275,29 @@ const docsIndex = (view: ViewDocs): HTMLElement => {
     _indexEl = h(
       'nav',
       {
-        className: A11Y_CLASSES.SR_ONLY,
+        className: `${A11Y_CLASSES.SR_ONLY} ${DOCS_CLASSES.DOCS_INDEX}`,
         'aria-label': DOCS_STRINGS.INDEX_LABEL,
+        // One delegated handler for every index link — closest() resolves
+        // the clicked anchor and data-path carries its manifest path.
+        onClick: (e: Event) => {
+          if (!isPlainClick(e)) return
+
+          const anchor = (e.target as HTMLElement).closest(HTML_TAGS.A)
+          const path = anchor?.getAttribute(DATA_ATTRS.DATA_PATH)
+
+          if (!path) return
+
+          e.preventDefault()
+
+          _indexView?.navigateDocs(path)
+        },
       },
       h('h2', null, DOCS_STRINGS.INDEX_TITLE)
     ) as HTMLElement
 
-    scheduleIndexSlice(() => pumpIndex(indexEntries(getDocsManifest().roots), _indexEl!))
+    scheduleIndexSlice(() =>
+      pumpIndex(indexEntries(getDocsManifest().roots), _indexEl!, document.createDocumentFragment())
+    )
   }
 
   return _indexEl

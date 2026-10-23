@@ -21,7 +21,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { webglAllowed, webglContext } from '@core/utils/canvas/webgl-mode.js'
-import { hasWebGpu } from '@core/utils/gpu/webgpu-widget.js'
+import { hasWebGpu, webgpuWidgetsEnabled } from '@core/utils/gpu/webgpu-widget.js'
 import { mountArchScene3d } from './arch-scene-3d.js'
 import { wasmPool } from '@core/utils/wasm/wasm-pool.js'
 import { WASM_ACTIONS } from '@core/tokens/data/wasm.js'
@@ -746,7 +746,11 @@ export const mountArchScene = (
   onPick: (_path: string) => void,
   onLost?: () => void
 ): ArchSceneHandle | null => {
-  if (!webglAllowed() || !hasWebGpu()) {
+  // The WebGPU arm honours the layer kill-switch — the unverified scene3d
+  // path only mounts under `?debug=webgpuWidgets:active`; everywhere else
+  // the proven three.js renderer stays authoritative (same rule the
+  // widget layer enforces through mountWebGpuWidget).
+  if (!webglAllowed() || !hasWebGpu() || !webgpuWidgetsEnabled()) {
     return mountArchSceneThree(canvas, roots, onPick, onLost)
   }
 
@@ -759,8 +763,36 @@ export const mountArchScene = (
   /** Teardown while the async mount is in flight. */
   let disposed = false
 
+  /** True once the timeout arm already mounted three.js — a late scene3d
+   *  resolution is torn down instead of double-mounting on one canvas. */
+  let threeMounted = false
+
+  /**
+   * Deadline guard: scene3d mount chains adapter → device → wasm
+   * artifact → surface configure — any stalled await leaves the canvas
+   * blank forever. Past the bound, the three.js arm mounts on the same
+   * canvas (a canvas bound 'webgpu' earlier by the attempt cannot hand
+   * out webgl — mountScene3d only binds after device+artifact land, so
+   * a timeout here means the canvas is still clean in practice; when it
+   * isn't, the three probe resolves null and onLost hides the section).
+   */
+  const mountTimer = setTimeout(() => {
+    threeMounted = true
+    inner = mountArchSceneThree(canvas, roots, onPick, onLost)
+
+    if (!inner) {
+      onLost?.()
+
+      return
+    }
+
+    inner.setActive(pendingPath)
+  }, DOCS_UNITS.SCENE3D_MOUNT_TIMEOUT)
+
   void mountArchScene3d(canvas, roots, onPick).then((h) => {
-    if (disposed) {
+    clearTimeout(mountTimer)
+
+    if (disposed || threeMounted) {
       h?.destroy()
 
       return
@@ -788,6 +820,7 @@ export const mountArchScene = (
     destroy() {
       disposed = true
 
+      clearTimeout(mountTimer)
       inner?.destroy()
     },
   }
