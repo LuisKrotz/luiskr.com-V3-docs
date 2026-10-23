@@ -102,4 +102,23 @@ describe('docs index — streaming tails', () => {
 
     expect(anchors.length).toBe(DOCS_UNITS.INDEX_CHUNK + 3)
   })
+
+  test('index links are non-tabbable and non-anchor clicks never navigate', async () => {
+    await flush(60)
+
+    const index = view.shadowRoot.querySelector(`nav[aria-label="${DOCS_STRINGS.INDEX_LABEL}"]`)
+
+    // tabindex="-1" keeps ~8k index anchors out of sequential focus order
+    // while AT link/heading enumeration still sees them.
+    const anchors = [...index.querySelectorAll('a')]
+
+    expect(anchors.every((a) => a.tabIndex === -1)).toBe(true)
+
+    // Clicking a non-anchor node inside the nav (the index title heading)
+    // resolves no closest('a') → the delegated handler bails out.
+    pushSpy.mockClear()
+    index.querySelector('h2').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(pushSpy).not.toHaveBeenCalled()
+  })
 })

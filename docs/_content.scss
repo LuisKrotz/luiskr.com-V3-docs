@@ -77,4 +77,17 @@
     // release it so the viewer can shrink to the track.
     min-width: 0;
   }
+
+  // ── Complete-document index ──────────────────────────────────────────
+  // The index nav is sr-only clipped AND parked a full containing-block
+  // height above the viewport, which flips `content-visibility: auto`
+  // into its permanent-skip mode: the ~10k-node subtree never runs
+  // style/layout/paint, yet stays fully present in the DOM, the AX tree,
+  // heading-map enumeration and crawlers (unlike display:none or
+  // content-visibility:hidden, all of which evict it from AT). Its
+  // contents re-engage automatically if a node gains focus.
+  &-index {
+    inset-block-start: -100%;
+    content-visibility: auto;
+  }
 }

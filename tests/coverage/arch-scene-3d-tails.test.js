@@ -16,6 +16,8 @@ import { ORBIT_EVENTS } from '@core/tokens/events/dom.js'
 import { CACHE_STORAGE_KEYS } from '@core/tokens/data/storage.js'
 import { STATE_CLASSES } from '@core/tokens/classes/state.js'
 import { HTML_TAGS } from '@core/tokens/elements/html.js'
+import { DOCS_UNITS } from '@core/tokens/strings/docs.js'
+import { createMockGL } from '@tests/fixtures/mock-webgl.js'
 
 /* ── Module mocks ─────────────────────────────────────────────── */
 
@@ -23,6 +25,7 @@ let mockSurface = null
 let mountResult = null
 let mockCtl = null
 let mockGpu = true
+let mockGpuEnabled = true
 
 jest.unstable_mockModule('@core/utils/gpu/scene3d.js', () => ({
   SCENE3D_NONE: 4294967295,
@@ -33,6 +36,7 @@ jest.unstable_mockModule('@core/utils/gpu/scene3d.js', () => ({
 
 jest.unstable_mockModule('@core/utils/gpu/webgpu-widget.js', () => ({
   hasWebGpu: () => mockGpu,
+  webgpuWidgetsEnabled: () => mockGpuEnabled,
   mountWebGpuWidget: async () => null,
   warmWidgetArtifacts: () => undefined,
 }))
@@ -584,6 +588,7 @@ describe('arch-scene composite', () => {
     origGetContext = proto.getContext
 
     mockGpu = true
+    mockGpuEnabled = true
 
     mockSurface = makeSurface()
     mockCtl = makeCtl()
@@ -592,6 +597,7 @@ describe('arch-scene composite', () => {
   })
 
   afterEach(() => {
+    jest.useRealTimers()
     proto.getContext = origGetContext
     canvas.remove()
   })
@@ -655,5 +661,65 @@ describe('arch-scene composite', () => {
     expect(mountArchScene(canvas, ROOTS, jest.fn())).toBeNull()
 
     document.documentElement.classList.remove(STATE_CLASSES.REDUCED_MOTION)
+  })
+
+  test('widget-layer kill switch takes the synchronous three path', () => {
+    // navigator.gpu present but webgpuWidgetsEnabled() off — the
+    // unverified scene3d arm stays parked and three mounts directly.
+    mockGpuEnabled = false
+
+    proto.getContext = () => null
+
+    expect(mountArchScene(canvas, ROOTS, jest.fn())).toBeNull()
+  })
+
+  test('stalled scene3d mount falls back to three at the deadline', async () => {
+    jest.useFakeTimers()
+
+    let resolveMount
+
+    mountResult = new Promise((r) => {
+      resolveMount = r
+    })
+
+    proto.getContext = function patched(type) {
+      if (/webgl/i.test(String(type))) return createMockGL()
+
+      return null
+    }
+
+    const handle = mountArchScene(canvas, ROOTS, jest.fn())
+
+    expect(handle).not.toBeNull()
+
+    await jest.advanceTimersByTimeAsync(DOCS_UNITS.SCENE3D_MOUNT_TIMEOUT + 1)
+
+    // The deadline mounted the three arm — a late wasm resolution is
+    // torn down rather than double-mounting on the one canvas.
+    resolveMount({ canvas, surface: mockSurface, destroy: jest.fn(() => mockSurface.destroy()) })
+
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+
+    expect(mockSurface.destroyed).toBe(true)
+
+    handle.destroy()
+  })
+
+  test('deadline fallback with no WebGL reports onLost', async () => {
+    jest.useFakeTimers()
+
+    mountResult = new Promise(() => {})
+
+    proto.getContext = () => null
+
+    const onLost = jest.fn()
+
+    const handle = mountArchScene(canvas, ROOTS, jest.fn(), onLost)
+
+    await jest.advanceTimersByTimeAsync(DOCS_UNITS.SCENE3D_MOUNT_TIMEOUT + 1)
+
+    expect(onLost).toHaveBeenCalled()
+
+    handle.destroy()
   })
 })
