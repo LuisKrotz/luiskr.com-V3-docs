@@ -142,6 +142,28 @@ describe('renderFile', () => {
     expect(renderFile('json', '{bad', 'json')).toContain('{bad')
   })
 
+  test('json container values are direct dd children — the stacked-row rule anchor', () => {
+    const html = renderFile(
+      'json',
+      '{"pages":56,"totals":{"a":1,"b":2},"routes":["/a/"],"results":[{"route":"/a/","n":3}]}',
+      'json'
+    )
+
+    // .docs-json-row:has(> dd > :is(.docs-json-obj, .docs-json-table,
+    // .docs-json-list, .docs-code)) stacks container-valued rows so the
+    // nested content gets the full row width — the two-column grid used
+    // to squeeze a long-keyed table into the 1fr sliver and paths
+    // shattered character-by-character. Any wrapper element between dd
+    // and the container silently restores the collapse.
+    expect(html).toContain('<dd><dl class="docs-json-obj">')
+    expect(html).toContain('<dd><ol class="docs-json-list">')
+    expect(html).toContain('<dd><table class="docs-json-table">')
+
+    // Scalar values likewise stay a single typed span — the right-align
+    // rule keys on :has(> .docs-json-num:only-child).
+    expect(html).toContain('<dd><span class="docs-json-num">56</span></dd>')
+  })
+
   test('code wraps in <pre> with the language class and syntax spans', () => {
     const html = renderFile('code', 'const x = 1', 'ts')
 

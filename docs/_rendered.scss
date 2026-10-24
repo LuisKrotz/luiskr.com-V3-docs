@@ -63,6 +63,10 @@
         }
       }
 
+      // Project table language — hairline row separators and quiet mono
+      // headers instead of a full cell grid: the border box reads heavy
+      // next to the treeview/report chrome, and per-cell rules fight the
+      // theme ink. The table stays block-level for horizontal scroll.
       table {
         border-collapse: collapse;
         width: 100%;
@@ -72,17 +76,21 @@
 
         th,
         td {
-          border: to-rem($space-3xs) solid currentColor;
           padding: to-rem($space-2xs) to-rem($space-sm);
           text-align: left;
+          vertical-align: top;
         }
 
         th {
-          background: var(--bg-secondary);
+          font-family: var(--font-mono);
+          font-weight: 400;
+          color: var(--text-secondary);
+          white-space: nowrap;
+          border-bottom: to-rem($space-3xs) solid currentColor;
         }
 
-        tr:nth-child(even) td {
-          background: var(--bg-secondary);
+        tr + tr td {
+          border-top: to-rem($space-3xs) solid color-mix(in srgb, currentColor 14%, transparent);
         }
       }
 
@@ -406,6 +414,18 @@
           margin: 0;
           min-width: 0;
           overflow-x: auto;
+
+          // Scalar values align at the row's right edge — counts and
+          // figures form a column the way a report table reads, instead
+          // of floating mid-row wherever the key's width left them.
+          // Strings/links stay left: prose is not a column.
+          &:has(> .docs-json-num:only-child),
+          &:has(> .docs-json-pct:only-child),
+          &:has(> .docs-json-bool:only-child),
+          &:has(> .docs-json-null:only-child) {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+          }
         }
 
         // Nested groups indent under their key.
@@ -414,6 +434,17 @@
         > dd .docs-json-list {
           margin: to-rem($space-3xs) 0;
         }
+      }
+
+      // Rows whose value is a container (nested object, table, list,
+      // code) stack: key on its own line, content at full row width
+      // below. In the two-column grid a long key ate the column and the
+      // nested table squeezed into a sliver — route report rows were
+      // unreadable. Scalar rows keep the grid + right-aligned values.
+      .docs-json-row:has(
+        > dd > :is(.docs-json-obj, .docs-json-table, .docs-json-list, .docs-code)
+      ) {
+        display: block;
       }
 
       .docs-json-num {
@@ -432,23 +463,47 @@
         opacity: 0.8;
       }
 
+      // Same hairline table language as .docs-md — row separators + a
+      // quiet mono header, no cell grid. Numeric cells right-align so
+      // count columns read as columns (the report tables were the ragged
+      // part: keys left, digits drifting under wide headers).
       .docs-json-table {
         border-collapse: collapse;
         font-size: to-rem($space-lg);
         display: block;
         overflow-x: auto;
+        // Natural width inside the scrollable dd — at least the row's
+        // width, more when columns need it (dd scrolls). Without this
+        // the block table compressed to the container and paths
+        // shattered character-by-character into a sliver.
+        width: max-content;
+        min-width: 100%;
 
         th,
         td {
-          border: to-rem($space-3xs) solid currentColor;
           padding: to-rem($space-2xs) to-rem($space-sm);
           text-align: left;
           vertical-align: top;
         }
 
         th {
-          background: var(--bg-secondary);
           font-family: var(--font-mono);
+          font-weight: 400;
+          color: var(--text-secondary);
+          white-space: nowrap;
+          border-bottom: to-rem($space-3xs) solid currentColor;
+        }
+
+        tr + tr td {
+          border-top: to-rem($space-3xs) solid color-mix(in srgb, currentColor 14%, transparent);
+        }
+
+        // A cell holding only a number/meter aligns right — the column
+        // edge then carries every count, instead of digits hanging mid-row.
+        td:has(> .docs-json-num:only-child),
+        td:has(> .docs-json-pct) {
+          text-align: right;
+          font-variant-numeric: tabular-nums;
         }
 
         // Pivot tables (coverage-summary shape) — the outer key is the row
@@ -456,6 +511,7 @@
         th[scope='row'] {
           font-weight: 400;
           color: var(--text-secondary);
+          white-space: normal;
           overflow-wrap: anywhere;
           max-width: 45ch;
         }
