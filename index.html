@@ -3,6 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Opts out of UA forced darkening — the app drives the scheme via html.dark-mode. -->
+    <meta name="color-scheme" content="only light" />
+    <!-- Same opt-out for Dark Reader's dynamic theme (rewrites adopted
+         stylesheets but cannot repaint canvas/WebGL pixels). -->
+    <meta name="darkreader-lock" />
     <meta name="robots" content="noindex, nofollow" />
     <title>Luis Krötz — docs dev</title>
   </head>

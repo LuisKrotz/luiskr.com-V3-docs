@@ -17,6 +17,7 @@ import { HTML_TAGS } from '@core/tokens/elements/html.js'
 import { WEBGL_STRINGS } from '@core/tokens/strings/webgl.js'
 import { DOCS_IDS } from '@core/tokens/ids/docs.js'
 import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
+import { PRINT_EVENTS } from '@core/tokens/events/dom.js'
 import { ROUTE_PATHS } from '@core/tokens/routes/paths.js'
 
 // Shared raycast-hit queue — the click handler picks hit[0].userData.path.
@@ -356,6 +357,39 @@ describe('docs architecture scene', () => {
     expect(handle).not.toBe(null)
 
     await flush()
+
+    handle.destroy()
+
+    canvas.remove()
+  })
+
+  test('printcapture repaints a frame and answers with a PNG data URL', () => {
+    const canvas = document.createElement(HTML_TAGS.CANVAS)
+
+    document.body.appendChild(canvas)
+
+    canvas.toDataURL = () => 'data:image/png;base64,CAP=='
+
+    const handle = mountArchScene(canvas, ROOTS, jest.fn())
+
+    expect(handle).not.toBe(null)
+
+    const detail = {}
+    const before = mockThreeState.renders
+
+    canvas.dispatchEvent(new CustomEvent(PRINT_EVENTS.CAPTURE, { detail }))
+
+    expect(mockThreeState.renders).toBeGreaterThan(before)
+    expect(detail.dataUrl).toContain('data:image/png')
+
+    // A crashed paint answers with nothing — the print walk falls back
+    // to its own toDataURL read for this canvas.
+    mockThreeState.renderThrow = true
+    detail.dataUrl = undefined
+
+    canvas.dispatchEvent(new CustomEvent(PRINT_EVENTS.CAPTURE, { detail }))
+
+    expect(detail.dataUrl).toBeUndefined()
 
     handle.destroy()
 

@@ -13,6 +13,7 @@
  */
 
 import { ARIA_ATTRS } from '@core/tokens/attrs/aria.js'
+import { READER_CLASSES } from '@core/tokens/classes/reader.js'
 import { DATA_ATTRS } from '@core/tokens/attrs/data.js'
 import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
 import { HTML_TAGS } from '@core/tokens/elements/html.js'
@@ -41,7 +42,7 @@ import {
   type DocsNode,
   type DocsFilePayload,
 } from './manifest.js'
-import { GL_EVENTS, MOUSE_EVENTS } from '@core/tokens/events/dom.js'
+import { GL_EVENTS, MOUSE_EVENTS, PRINT_EVENTS } from '@core/tokens/events/dom.js'
 import { renderDocs } from './render.js'
 import { mountDocsGlStrip, type DocsGlHandle } from './gl-strip.js'
 import { mountArchScene, type ArchSceneHandle } from './arch-scene.js'
@@ -373,6 +374,43 @@ export class ViewDocs extends BaseComponent {
       () => this.docsPath,
       this._toastText
     )
+
+    window.addEventListener(PRINT_EVENTS.PREPARE, this._onPrintPrepare)
+  }
+
+  /**
+   * Print-prepare answer — the print adapter fires `printprepare` before
+   * its media walk so generated DOM reaches the readable mirror: the
+   * payload box's rendered form (mermaid SVG diagrams, istanbul tables)
+   * replaces the article's static copy. Cloned canvases are dead buffers
+   * and get stripped — the live canvases inject their own captured
+   * stills during the walk.
+   */
+  private _onPrintPrepare = (): void => {
+    const article = document.querySelector(`${HTML_TAGS.ARTICLE}.${READER_CLASSES.CONTENT}`)
+
+    if (!article) return
+
+    // Protected source views never print — the exfiltration guard blanks
+    // the live viewer via @media print, and the emitted mirror carries the
+    // same source payload, so it has to empty for the print pass too. The
+    // check reads the node (not the payload) so a print fired before the
+    // fetch lands is still guarded.
+    if (this.node && isSourceRoot(fileIdRoot(this.node.id || CHAR_STRINGS.EMPTY))) {
+      article.replaceChildren()
+
+      return
+    }
+
+    const box = this.$(DOCS_SELECTORS.CONTENT)
+
+    if (!box?.childElementCount) return
+
+    const clone = box.cloneNode(true) as HTMLElement
+
+    clone.querySelectorAll(HTML_TAGS.CANVAS).forEach((c) => c.remove())
+
+    article.replaceChildren(...Array.from(clone.childNodes))
   }
 
   /** Lifecycle: (re)mounts the GL strip, scene and viewer content. */
@@ -511,6 +549,8 @@ export class ViewDocs extends BaseComponent {
     this._covNavDispose = null
 
     this._sceneCanvas?.removeEventListener(GL_EVENTS.WEBGL_CONTEXT_RESTORED, this._onSceneRestored)
+
+    window.removeEventListener(PRINT_EVENTS.PREPARE, this._onPrintPrepare)
 
     this._glHandle?.destroy()
 

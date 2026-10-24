@@ -209,6 +209,29 @@ describe('copy guard surface', () => {
     dispose()
   })
 
+  test('PrintScreen without a clipboard API skips the clear but telemeters', () => {
+    try {
+      Object.defineProperty(globalThis.navigator, 'clipboard', {
+        value: undefined,
+        configurable: true,
+      })
+    } catch {
+      /* navigator sealed — env already lacks the API */
+    }
+
+    const dispose = attach()
+
+    globalThis.fetch.mockClear()
+
+    document.dispatchEvent(
+      new KeyboardEvent(KEYBOARD_EVENTS.KEYUP, { key: DOCS_STRINGS.KEY_PRINT_SCREEN })
+    )
+
+    expect(globalThis.fetch).toHaveBeenCalled()
+
+    dispose()
+  })
+
   test('dispose detaches every listener', () => {
     const dispose = attach()
 

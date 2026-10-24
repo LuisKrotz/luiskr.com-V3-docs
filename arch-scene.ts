@@ -29,8 +29,15 @@ import { CACHE_STORAGE_KEYS } from '@core/tokens/data/storage.js'
 import { TYPE_STRINGS } from '@core/tokens/strings/types.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 import { DOCS_STRINGS, DOCS_UNITS } from '@core/tokens/strings/docs.js'
+import { NET_STRINGS } from '@core/tokens/strings/net.js'
 import { HTML_TAGS } from '@core/tokens/elements/html.js'
-import { GL_EVENTS, MOUSE_EVENTS, ORBIT_EVENTS, POINTER_EVENTS } from '@core/tokens/events/dom.js'
+import {
+  GL_EVENTS,
+  MOUSE_EVENTS,
+  ORBIT_EVENTS,
+  POINTER_EVENTS,
+  PRINT_EVENTS,
+} from '@core/tokens/events/dom.js'
 import { devWarn } from '@core/devlog.js'
 import type { DocsNode } from './manifest.js'
 
@@ -806,6 +813,21 @@ export const mountArchSceneThree = (
     }
   }
 
+  /**
+   * Print-capture answer — the print adapter dispatches `printcapture` on
+   * every canvas before reading it; this scene clears its buffer each frame
+   * (no preserveDrawingBuffer), so a toDataURL read mid-loop would return a
+   * blank. Re-paint once, then hand the PNG back through event.detail.
+   * @param e CustomEvent carrying { dataUrl } — written here on success.
+   */
+  const onPrintCapture = (e: Event) => {
+    const detail = (e as CustomEvent<{ dataUrl?: string }>).detail
+
+    if (paintFrame()) detail.dataUrl = canvas.toDataURL(NET_STRINGS.IMAGE_PNG)
+  }
+
+  canvas.addEventListener(PRINT_EVENTS.CAPTURE, onPrintCapture)
+
   resize()
 
   let raf = 0
@@ -861,6 +883,7 @@ export const mountArchSceneThree = (
       canvas.removeEventListener(MOUSE_EVENTS.CLICK, onClick)
       canvas.removeEventListener(POINTER_EVENTS.POINTERDOWN, onPointerDown)
       canvas.removeEventListener(GL_EVENTS.WEBGL_CONTEXT_LOST, onContextLost)
+      canvas.removeEventListener(PRINT_EVENTS.CAPTURE, onPrintCapture)
 
       controls.removeEventListener(ORBIT_EVENTS.START, onControlStart)
       controls.removeEventListener(ORBIT_EVENTS.END, onControlEnd)
