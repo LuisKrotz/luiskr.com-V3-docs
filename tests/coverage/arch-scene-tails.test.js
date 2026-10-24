@@ -478,7 +478,7 @@ describe('docs architecture scene', () => {
     }
   })
 
-  test('ViewDocs scene stays mounted as the background on every docs page', async () => {
+  test('ViewDocs scene persists across docs navigations and follows the path', async () => {
     const prev = router.currentRoute
 
     router.currentRoute = {
@@ -496,13 +496,15 @@ describe('docs architecture scene', () => {
 
     expect(first).not.toBe(null)
 
-    // Navigating deeper re-renders the canvas → the old handle is
-    // destroyed and a fresh scene mounts in its place.
+    // The canvas is persistent — navigation re-seats the SAME scene and
+    // only re-syncs the active-path highlight (no GPU remount).
+    const activeSpy = jest.spyOn(first, 'setActive')
+
     view.onRouteParamChange({ params: { docsPath: 'docs' } })
     await flush()
 
-    expect(view._sceneHandle).not.toBe(null)
-    expect(view._sceneHandle).not.toBe(first)
+    expect(view._sceneHandle).toBe(first)
+    expect(activeSpy).toHaveBeenCalledWith('docs')
 
     cleanup()
     router.currentRoute = prev
@@ -1202,5 +1204,109 @@ describe('docs architecture scene', () => {
 
     handle.destroy()
     canvas.remove()
+  })
+
+  test('setPaused halts and re-arms the rAF loop; resize refits', async () => {
+    const origRaf = globalThis.requestAnimationFrame
+    let tickFn = null
+
+    globalThis.requestAnimationFrame = (fn) => {
+      tickFn = fn
+
+      return 1
+    }
+
+    const canvas = document.createElement(HTML_TAGS.CANVAS)
+
+    document.body.appendChild(canvas)
+
+    const handle = mountArchScene(canvas, ROOTS, jest.fn())
+
+    expect(handle).not.toBe(null)
+
+    await flush()
+
+    try {
+      // Same-state call is a no-op.
+      handle.setPaused(false)
+
+      // Pause parks the loop; a pending tick that fires anyway dead-ends
+      // on the entry guard without painting.
+      handle.setPaused(true)
+
+      const before = mockThreeState.renders
+
+      tickFn(performance.now())
+
+      expect(mockThreeState.renders).toBe(before)
+
+      // Resume — refits the canvas box and re-arms the loop.
+      handle.setPaused(false)
+
+      expect(tickFn).not.toBe(null)
+
+      // Direct re-fit entry-point.
+      handle.resize()
+
+      // Post-destroy resume stays dead — the !disposed arm.
+      handle.setPaused(true)
+      handle.destroy()
+      handle.setPaused(false)
+    } finally {
+      globalThis.requestAnimationFrame = origRaf
+    }
+
+    canvas.remove()
+  })
+
+  test('missing ResizeObserver keeps the mount-time size; an observed resize refits', async () => {
+    const origRO = globalThis.ResizeObserver
+
+    // RO-absent arm — the observer optional-chain collapses to null.
+    delete globalThis.ResizeObserver
+
+    const c1 = document.createElement(HTML_TAGS.CANVAS)
+
+    document.body.appendChild(c1)
+
+    const h1 = mountArchScene(c1, ROOTS, jest.fn())
+
+    expect(h1).not.toBe(null)
+
+    h1.destroy()
+    c1.remove()
+
+    // RO-callback arm — a delivered observation re-runs the fit.
+    let roCb = null
+
+    globalThis.ResizeObserver = class {
+      constructor(cb) {
+        roCb = cb
+      }
+
+      observe() {}
+      disconnect() {}
+    }
+
+    const c2 = document.createElement(HTML_TAGS.CANVAS)
+
+    document.body.appendChild(c2)
+
+    const h2 = mountArchScene(c2, ROOTS, jest.fn())
+
+    expect(h2).not.toBe(null)
+
+    // The RO callback defers the fit to rAF — firing twice before the
+    // frame flushes covers the coalesce early-return, then the deferred
+    // callback re-runs the fit once.
+    roCb()
+    roCb()
+
+    await flush()
+
+    h2.destroy()
+    c2.remove()
+
+    globalThis.ResizeObserver = origRO
   })
 })

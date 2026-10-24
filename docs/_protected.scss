@@ -9,9 +9,14 @@
     display: none;
   }
 
-  // The caption chip is meaningless without a live scene behind it.
-  &-scene-off + &-scene-hint {
-    display: none;
+  // The caption chip and zoom trigger are meaningless without a live
+  // scene — the canvas carries scene-off inside the stage, so :has()
+  // reaches back to the column head.
+  &-map:has(.#{$_B_DOCS}-scene-off) {
+    .#{$_B_DOCS}-scene-hint,
+    .#{$_B_DOCS}-map-zoom {
+      display: none;
+    }
   }
 
   // ── Copy protection surface ───────────────────────────────────────────

@@ -23,6 +23,7 @@ import { TYPE_STRINGS } from '@core/tokens/strings/types.js'
 import { h } from '@core/jsx.js'
 import { isPlainClick } from '@core/utils/dom.js'
 import { folderSvg } from './folder-svg.js'
+import { treeIcon } from './tree-icon.js'
 import { crumbsForPath, getDocsManifest } from './manifest.js'
 import type { ViewDocs } from './Docs.js'
 import type { DocsNode, DocsRoot } from './manifest.js'
@@ -90,6 +91,7 @@ const treeNodes = (view: ViewDocs, nodes: DocsNode[]): HTMLElement[] =>
             view.pickTreeNode(node)
           }}
         >
+          {treeIcon(node, open)}
           {node.name}
         </a>
         {isDir && open && node.children?.length ? (
@@ -308,53 +310,70 @@ const docsIndex = (view: ViewDocs): HTMLElement => {
  * input carries the full relative path and commits on Enter (Escape
  * restores the current path).
  */
-const crumbBar = (view: ViewDocs) => {
+/**
+ * The crumb anchors + editable path input — shared by the desktop crumb
+ * bar and the ≤1280px combobox dropdown (tree + breadcrumb merge into
+ * one control there). Rendered once per surface so the edit field keeps
+ * the same contract in both.
+ */
+const crumbLinks = (view: ViewDocs) => {
   const crumbs = crumbsForPath(view.docsPath)
 
-  return (
-    <nav className={DOCS_CLASSES.DOCS_CRUMBS} aria-label={DOCS_STRINGS.TITLE}>
+  return [
+    <a
+      key={CHAR_STRINGS.EMPTY}
+      href={docsHref(CHAR_STRINGS.EMPTY)}
+      className={DOCS_CLASSES.DOCS_CRUMB}
+      onClick={(e: Event) => {
+        if (!isPlainClick(e)) return
+
+        e.preventDefault()
+
+        view.navigateDocs(CHAR_STRINGS.EMPTY)
+      }}
+    >
+      {DOCS_STRINGS.TITLE}
+    </a>,
+    ...crumbs.map((c) => (
       <a
-        href={docsHref(CHAR_STRINGS.EMPTY)}
+        key={c.path}
+        href={docsHref(c.path)}
         className={DOCS_CLASSES.DOCS_CRUMB}
         onClick={(e: Event) => {
           if (!isPlainClick(e)) return
 
           e.preventDefault()
 
-          view.navigateDocs(CHAR_STRINGS.EMPTY)
+          view.navigateDocs(c.path)
         }}
       >
-        {DOCS_STRINGS.TITLE}
+        {c.label}
       </a>
-      {crumbs.map((c) => (
-        <a
-          key={c.path}
-          href={docsHref(c.path)}
-          className={DOCS_CLASSES.DOCS_CRUMB}
-          onClick={(e: Event) => {
-            if (!isPlainClick(e)) return
-
-            e.preventDefault()
-
-            view.navigateDocs(c.path)
-          }}
-        >
-          {c.label}
-        </a>
-      ))}
-      <input
-        className={DOCS_CLASSES.DOCS_CRUMB_EDIT}
-        aria-label={DOCS_STRINGS.CRUMB_INPUT_LABEL}
-        title={DOCS_STRINGS.CRUMB_INPUT_HINT}
-        placeholder={DOCS_STRINGS.CRUMB_PLACEHOLDER}
-        name={DOCS_STRINGS.CRUMB_INPUT_NAME}
-        value={`${CHAR_STRINGS.SLASH}${view.docsPath}`}
-        onKeydown={(e: Event) => view.onCrumbKey(e as KeyboardEvent)}
-        onFocus={(e: Event) => (e.target as HTMLInputElement).select()}
-      />
-    </nav>
-  )
+    )),
+    <input
+      key={DOCS_STRINGS.CRUMB_INPUT_NAME}
+      className={DOCS_CLASSES.DOCS_CRUMB_EDIT}
+      aria-label={DOCS_STRINGS.CRUMB_INPUT_LABEL}
+      title={DOCS_STRINGS.CRUMB_INPUT_HINT}
+      placeholder={DOCS_STRINGS.CRUMB_PLACEHOLDER}
+      name={DOCS_STRINGS.CRUMB_INPUT_NAME}
+      value={`${CHAR_STRINGS.SLASH}${view.docsPath}`}
+      onKeydown={(e: Event) => view.onCrumbKey(e as KeyboardEvent)}
+      onFocus={(e: Event) => (e.target as HTMLInputElement).select()}
+    />,
+  ]
 }
+
+/**
+ * Editable breadcrumb strip — each crumb is a jump-to link; the trailing
+ * input carries the full relative path and commits on Enter (Escape
+ * restores the current path).
+ */
+const crumbBar = (view: ViewDocs) => (
+  <nav className={DOCS_CLASSES.DOCS_CRUMBS} aria-label={DOCS_STRINGS.TITLE}>
+    {crumbLinks(view)}
+  </nav>
+)
 
 /** The docs template — assembled for ViewDocs.render(). */
 export const renderDocs = (view: ViewDocs) => {
@@ -413,20 +432,6 @@ export const renderDocs = (view: ViewDocs) => {
 
       <canvas id={DOCS_IDS.GL} className={DOCS_CLASSES.DOCS_GL} aria-hidden="true" />
 
-      {/* Persistent 3D architecture backdrop — orbit/pinch on the exposed
-          areas, tap-to-pick navigates, folder names reveal on zoom. */}
-      <canvas
-        id={DOCS_IDS.SCENE}
-        className={DOCS_CLASSES.DOCS_SCENE}
-        aria-label={DOCS_STRINGS.TREE_LABEL}
-      />
-
-      {/* Scene caption — the backdrop reads as decoration without a
-          label; the chip states plainly that it is the interactive
-          architecture map. Hidden via the sibling scene-off rule when
-          the scene context is lost. */}
-      <div className={DOCS_CLASSES.DOCS_SCENE_HINT}>{DOCS_STRINGS.SCENE_HINT}</div>
-
       <header className={DOCS_CLASSES.DOCS_HEADER}>
         <h1
           className={DOCS_CLASSES.DOCS_TITLE}
@@ -444,91 +449,166 @@ export const renderDocs = (view: ViewDocs) => {
       </header>
 
       <div className={DOCS_CLASSES.DOCS_BODY}>
-        <button
-          type={FORM_ATTRS.TYPE_BUTTON}
-          className={DOCS_CLASSES.DOCS_NAV_TOGGLE}
-          aria-expanded={String(view.navOpen)}
-          aria-controls={DOCS_IDS.TREE}
-          onClick={() => view.toggleNav()}
-        >
-          {DOCS_STRINGS.NAV_TOGGLE}
-        </button>
-
-        <nav
-          className={DOCS_CLASSES.DOCS_NAV}
-          aria-label={DOCS_STRINGS.TREE_LABEL}
-          onKeydown={(e: Event) => view.onTreeKey(e as KeyboardEvent)}
-        >
-          <h2 className={A11Y_CLASSES.SR_ONLY}>{DOCS_STRINGS.TREE_LABEL}</h2>
-          <ul
-            className={DOCS_CLASSES.DOCS_TREE}
-            id={DOCS_IDS.TREE}
-            role={ARIA_ATTRS.ROLE_TREE}
+        {/* Stack wrapper — 1025–1280 it is the left grid cell carrying
+            nav + content vertically while the map owns column 2; ≥1281
+            display:contents dissolves it so nav/main/map become three
+            sibling columns of the body grid. */}
+        <div className={DOCS_CLASSES.DOCS_STACK}>
+          {/* Combobox navigation — ≤1280px the tree and the breadcrumb
+            merge into one disclosure control: the button face carries
+            the current path (the breadcrumb collapsed), the dropdown
+            panel keeps the full crumb row + editable input above the
+            treeview. ≥1281px the panel is always open as the left
+            column and the button/hidden-crumbs bow out via CSS. */}
+          <nav
+            className={DOCS_CLASSES.DOCS_NAV}
             aria-label={DOCS_STRINGS.TREE_LABEL}
+            onKeydown={(e: Event) => view.onTreeKey(e as KeyboardEvent)}
           >
-            {treeNodes(view, view.rootsAsNodes())}
-          </ul>
-        </nav>
-
-        <section className={DOCS_CLASSES.DOCS_MAIN} aria-label={DOCS_STRINGS.MAIN_LABEL}>
-          {/* Region heading — the current folder's own name so the h2 is
-              meaningful ('docs', 'coverage-core'…), not a generic label. */}
-          <h2 className={A11Y_CLASSES.SR_ONLY}>
-            {isRoot ? DOCS_STRINGS.MAIN_LABEL : node?.name || view.docsPath}
-          </h2>
-
-          {crumbBar(view)}
-
-          {view.filePayload || view.fileLoading ? (
-            <section
-              className={`${DOCS_CLASSES.DOCS_VIEWER}${view.isProtectedView() ? ` ${DOCS_CLASSES.DOCS_PROTECTED}` : CHAR_STRINGS.EMPTY}`}
-              id={DOCS_IDS.VIEWER}
+            <button
+              type={FORM_ATTRS.TYPE_BUTTON}
+              className={DOCS_CLASSES.DOCS_NAV_TOGGLE}
+              aria-expanded={String(view.navOpen)}
+              aria-controls={DOCS_IDS.NAV_PANEL}
+              onClick={() => view.toggleNav()}
             >
-              <div className={DOCS_CLASSES.DOCS_VIEWER_HEAD}>
+              {/* Combobox face — the merged breadcrumb: root label +
+                each crumb of the current location. */}
+              {[DOCS_STRINGS.TITLE, ...crumbsForPath(view.docsPath).map((c) => c.label)].join(
+                ` ${CHAR_STRINGS.SLASH} `
+              )}
+            </button>
+            <div className={DOCS_CLASSES.DOCS_NAV_PANEL} id={DOCS_IDS.NAV_PANEL}>
+              {/* The breadcrumb merged into the dropdown — hidden ≥1281
+                where the bar above the content column owns the role. */}
+              <div className={DOCS_CLASSES.DOCS_NAV_CRUMBS}>{crumbLinks(view)}</div>
+              <h2 className={A11Y_CLASSES.SR_ONLY}>{DOCS_STRINGS.TREE_LABEL}</h2>
+              <ul
+                className={DOCS_CLASSES.DOCS_TREE}
+                id={DOCS_IDS.TREE}
+                role={ARIA_ATTRS.ROLE_TREE}
+                aria-label={DOCS_STRINGS.TREE_LABEL}
+              >
+                {treeNodes(view, view.rootsAsNodes())}
+              </ul>
+            </div>
+          </nav>
+
+          <section className={DOCS_CLASSES.DOCS_MAIN} aria-label={DOCS_STRINGS.MAIN_LABEL}>
+            {/* Region heading — the current folder's own name so the h2 is
+              meaningful ('docs', 'coverage-core'…), not a generic label. */}
+            <h2 className={A11Y_CLASSES.SR_ONLY}>
+              {isRoot ? DOCS_STRINGS.MAIN_LABEL : node?.name || view.docsPath}
+            </h2>
+
+            {crumbBar(view)}
+
+            {view.filePayload || view.fileLoading ? (
+              <section
+                className={`${DOCS_CLASSES.DOCS_VIEWER}${view.isProtectedView() ? ` ${DOCS_CLASSES.DOCS_PROTECTED}` : CHAR_STRINGS.EMPTY}`}
+                id={DOCS_IDS.VIEWER}
+              >
+                <div className={DOCS_CLASSES.DOCS_VIEWER_HEAD}>
+                  <button
+                    type={FORM_ATTRS.TYPE_BUTTON}
+                    className={DOCS_CLASSES.DOCS_VIEWER_BACK}
+                    onClick={() => view.closeFile()}
+                  >
+                    {DOCS_STRINGS.VIEWER_BACK}
+                  </button>
+                  {/* The open file is a real heading — AT heading-jump lands
+                    on the document being read. */}
+                  <h2 className={A11Y_CLASSES.SR_ONLY}>{view.node?.name || view.docsPath}</h2>
+                  <span
+                    className={DOCS_CLASSES.DOCS_VIEWER_PATH}
+                    {...{ [MICRODATA_ATTRS.ITEMPROP]: MICRODATA_VALUES.PROP_URL }}
+                  >
+                    {view.docsPath}
+                  </span>
+                </div>
+                <div
+                  className={DOCS_CLASSES.DOCS_CONTENT}
+                  {...{ [MICRODATA_ATTRS.ITEMPROP]: MICRODATA_VALUES.PROP_ARTICLE_BODY }}
+                />
+              </section>
+            ) : null}
+
+            {children.length ? (
+              <div
+                className={DOCS_CLASSES.DOCS_GRID}
+                id={DOCS_IDS.GRID}
+                role={ARIA_ATTRS.ROLE_REGION}
+                aria-label={DOCS_STRINGS.GRID_LABEL}
+                onKeydown={(e: Event) => view.onGridKey(e as KeyboardEvent)}
+              >
+                {gridCards(view, children)}
+              </div>
+            ) : null}
+
+            {!node && !isRoot ? (
+              <p className={DOCS_CLASSES.DOCS_UPDATED}>{DOCS_STRINGS.NOT_FOUND_PATH}</p>
+            ) : null}
+
+            {/* Complete document index — every manifest node as a heading
+              link; memoized DOM, re-attached each render. */}
+            {docsIndex(view)}
+          </section>
+        </div>
+
+        {/* Architecture map — the interactive alternative nav surface:
+            a right-hand column on ≥1025px (hidden under it), orbit/pinch
+            on the persistent scene canvas, tap-to-pick navigates. The
+            zoom trigger re-seats the SAME canvas into the centered glass
+            dialog — no context loss, no remount. */}
+        <aside className={DOCS_CLASSES.DOCS_MAP} aria-label={DOCS_STRINGS.MAP_LABEL}>
+          <div className={DOCS_CLASSES.DOCS_MAP_HEAD}>
+            <span className={DOCS_CLASSES.DOCS_SCENE_HINT}>{DOCS_STRINGS.SCENE_HINT}</span>
+            <button
+              type={FORM_ATTRS.TYPE_BUTTON}
+              className={DOCS_CLASSES.DOCS_MAP_ZOOM}
+              aria-label={DOCS_STRINGS.MAP_ZOOM}
+              aria-expanded={String(view._mapZoomed)}
+              aria-controls={DOCS_IDS.MAP_MODAL}
+              onClick={() => view.toggleMapZoom()}
+            >
+              {CHAR_STRINGS.EXPAND_GLYPH}
+            </button>
+          </div>
+          {!view._mapZoomed && <div className={DOCS_CLASSES.DOCS_MAP_STAGE} />}
+        </aside>
+
+        {/* Map zoom dialog — glass overlay centering the enlarged scene;
+            the stage hosts the same persistent canvas while open.
+            Backdrop clicks (target === the overlay itself) dismiss. */}
+        {view._mapZoomed && (
+          <div
+            className={DOCS_CLASSES.DOCS_MAP_MODAL}
+            onClick={(e: Event) => {
+              if (e.target === e.currentTarget) view.toggleMapZoom()
+            }}
+          >
+            <div
+              className={DOCS_CLASSES.DOCS_MAP_DIALOG}
+              id={DOCS_IDS.MAP_MODAL}
+              role={ARIA_ATTRS.ROLE_DIALOG}
+              aria-modal={ATTR_VALUES.TRUE}
+              aria-label={DOCS_STRINGS.MAP_LABEL}
+            >
+              <div className={DOCS_CLASSES.DOCS_MAP_HEAD}>
+                <span className={DOCS_CLASSES.DOCS_SCENE_HINT}>{DOCS_STRINGS.SCENE_HINT}</span>
                 <button
                   type={FORM_ATTRS.TYPE_BUTTON}
-                  className={DOCS_CLASSES.DOCS_VIEWER_BACK}
-                  onClick={() => view.closeFile()}
+                  className={DOCS_CLASSES.DOCS_MAP_CLOSE}
+                  aria-label={DOCS_STRINGS.MAP_CLOSE}
+                  onClick={() => view.toggleMapZoom()}
                 >
-                  {DOCS_STRINGS.VIEWER_BACK}
+                  {CHAR_STRINGS.CLOSE_GLYPH}
                 </button>
-                {/* The open file is a real heading — AT heading-jump lands
-                    on the document being read. */}
-                <h2 className={A11Y_CLASSES.SR_ONLY}>{view.node?.name || view.docsPath}</h2>
-                <span
-                  className={DOCS_CLASSES.DOCS_VIEWER_PATH}
-                  {...{ [MICRODATA_ATTRS.ITEMPROP]: MICRODATA_VALUES.PROP_URL }}
-                >
-                  {view.docsPath}
-                </span>
               </div>
-              <div
-                className={DOCS_CLASSES.DOCS_CONTENT}
-                {...{ [MICRODATA_ATTRS.ITEMPROP]: MICRODATA_VALUES.PROP_ARTICLE_BODY }}
-              />
-            </section>
-          ) : null}
-
-          {children.length ? (
-            <div
-              className={DOCS_CLASSES.DOCS_GRID}
-              id={DOCS_IDS.GRID}
-              role={ARIA_ATTRS.ROLE_REGION}
-              aria-label={DOCS_STRINGS.GRID_LABEL}
-              onKeydown={(e: Event) => view.onGridKey(e as KeyboardEvent)}
-            >
-              {gridCards(view, children)}
+              <div className={DOCS_CLASSES.DOCS_MAP_STAGE} />
             </div>
-          ) : null}
-
-          {!node && !isRoot ? (
-            <p className={DOCS_CLASSES.DOCS_UPDATED}>{DOCS_STRINGS.NOT_FOUND_PATH}</p>
-          ) : null}
-
-          {/* Complete document index — every manifest node as a heading
-              link; memoized DOM, re-attached each render. */}
-          {docsIndex(view)}
-        </section>
+          </div>
+        )}
       </div>
     </div>
   ) as unknown as HTMLElement

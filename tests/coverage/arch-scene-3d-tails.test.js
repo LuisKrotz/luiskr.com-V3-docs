@@ -722,4 +722,78 @@ describe('arch-scene composite', () => {
 
     handle.destroy()
   })
+
+  test('wrapper resize/setPaused delegate through inner, pending pause replays', async () => {
+    const handle = mountArchScene(canvas, ROOTS, jest.fn())
+
+    expect(handle).not.toBeNull()
+
+    // Pre-resolution calls — inner is null: the ?. delegates park and
+    // setPaused stores pendingPaused for the mount-time replay.
+    handle.resize()
+    handle.setPaused(true)
+
+    await flush()
+
+    // The replayed pause landed on the resolved 3d arm — a pending tick
+    // (or none) sees the paused flag and skips frames.
+    const frames = mockSurface.frames.length
+
+    await flush()
+
+    expect(mockSurface.frames.length).toBe(frames)
+
+    // Post-resolution calls hit the live arm directly.
+    handle.setPaused(false)
+    handle.resize()
+
+    handle.destroy()
+
+    expect(mockSurface.destroyed).toBe(true)
+  })
+
+  test('setPaused gates the 3d tick entry; resume refits and re-arms', async () => {
+    const origRaf = globalThis.requestAnimationFrame
+    let tickFn = null
+
+    globalThis.requestAnimationFrame = (fn) => {
+      tickFn = fn
+
+      return 1
+    }
+
+    const handle = await mountArchScene3d(canvas, ROOTS, jest.fn())
+
+    expect(handle).not.toBeNull()
+
+    await flush()
+
+    try {
+      handle.setPaused(true)
+
+      const frames = mockSurface.frames.length
+
+      tickFn(performance.now())
+
+      expect(mockSurface.frames.length).toBe(frames)
+
+      // Same-state no-op arm.
+      handle.setPaused(true)
+
+      // Resume — refits the surface box and re-arms the loop.
+      handle.setPaused(false)
+
+      expect(tickFn).not.toBeNull()
+
+      // Direct re-fit entry-point.
+      handle.resize()
+
+      // Post-destroy resume stays dead — the !disposed arm.
+      handle.setPaused(true)
+      handle.destroy()
+      handle.setPaused(false)
+    } finally {
+      globalThis.requestAnimationFrame = origRaf
+    }
+  })
 })

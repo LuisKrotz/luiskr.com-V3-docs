@@ -17,6 +17,14 @@
     -webkit-backdrop-filter: blur(to-rem($space-xs));
     backdrop-filter: blur(to-rem($space-xs));
     border-radius: var(--radius-md);
+
+    // ≤1280px the breadcrumb merges into the nav combobox — the dropdown
+    // carries the crumb row + edit input; this standalone bar hides. The
+    // media block sits AFTER the base display:flex — equal specificity,
+    // so source order must carry the override.
+    @media (max-width: #{$vw-1280}) {
+      display: none;
+    }
   }
 
   &-crumb {

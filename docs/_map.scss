@@ -1,0 +1,115 @@
+// ════════════════════════════════════════════════════════════════════════════
+//  docs/_map.scss — the architecture-map column (interactive alternative
+//  nav surface: orbit/pinch + tap-to-pick on the persistent scene canvas),
+//  its zoom trigger, and the centered glass dialog the canvas re-seats
+//  into while zoomed. Hidden ≤1024px — the tree/combobox carries
+//  navigation on small screens.
+//  Imported by docs.scss (manifest) — not compiled standalone.
+// ════════════════════════════════════════════════════════════════════════════
+
+.#{$_B_DOCS} {
+  // ── Map column — sticky pane the same height as the viewport, so the
+  //    radial tree stays in view while the content column scrolls. ─────
+  &-map {
+    pointer-events: auto;
+    display: none;
+    position: sticky;
+    top: to-rem($space-xl);
+    height: calc(100dvh - #{to-rem($space-3xl)});
+    flex-direction: column;
+    gap: to-rem($space-2xs);
+    box-sizing: border-box;
+    padding: to-rem($space-sm);
+    background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
+    -webkit-backdrop-filter: blur(to-rem($space-xs));
+    backdrop-filter: blur(to-rem($space-xs));
+    border: to-rem($space-3xs) solid transparent;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+
+    // Visible only above the mobile cut — ≤1024px the comboboxed tree
+    // owns navigation and no GPU work is paid for a hidden surface.
+    @media (min-width: #{$vw-1024 + 1px}) {
+      display: flex;
+    }
+  }
+
+  &-map-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: to-rem($space-xs);
+  }
+
+  // Canvas seat — the persistent scene node re-parents here every
+  // render; when the zoom dialog owns the canvas this frame stays empty.
+  &-map-stage {
+    flex: 1;
+    min-height: 0;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+
+  // Zoom + close controls — the project's hairline-corner square button.
+  &-map-zoom,
+  &-map-close {
+    @extend %RESETBTN;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: to-rem($space-2xl);
+    height: to-rem($space-2xl);
+    flex: 0 0 auto;
+    font-family: var(--font-mono);
+    font-size: to-rem($space-lg);
+    line-height: 1;
+    color: inherit;
+    background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
+    border: to-rem($space-3xs) solid currentColor;
+    border-radius: var(--radius-2xs);
+    cursor: pointer;
+    transition: opacity 0.2s ease;
+
+    &:hover,
+    &:focus-visible {
+      opacity: 0.7;
+      outline: to-rem($space-3xs) solid var(--focus-ring);
+      outline-offset: to-rem($space-3xs);
+    }
+  }
+
+  // ── Zoom modal — the glass overlay + centered dialog. The overlay's
+  //    translucency + blur is the requested glass transparency; the
+  //    dialog keeps a hairline frame and hosts the enlarged scene. ─────
+  &-map-modal {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-top);
+    display: grid;
+    place-items: center;
+    padding: to-rem($space-xl);
+    box-sizing: border-box;
+    pointer-events: auto;
+    background: color-mix(in srgb, var(--bg-primary) 55%, transparent);
+    -webkit-backdrop-filter: blur(to-rem($space-md));
+    backdrop-filter: blur(to-rem($space-md));
+  }
+
+  &-map-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: to-rem($space-2xs);
+    width: min(88vw, 100%);
+    height: min(82dvh, 100%);
+    box-sizing: border-box;
+    padding: to-rem($space-md);
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--bg-primary) 78%, transparent);
+    -webkit-backdrop-filter: blur(to-rem($space-xs));
+    backdrop-filter: blur(to-rem($space-xs));
+    border: var(--space-hairline) solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card-hover);
+  }
+}

@@ -23,7 +23,7 @@ import { TYPE_STRINGS } from '@core/tokens/strings/types.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 import { DOCS_UNITS } from '@core/tokens/strings/docs.js'
 import { devWarn } from '@core/devlog.js'
-import { mountScene3d, SCENE3D_NONE } from '@core/utils/gpu/scene3d.js'
+import { mountScene3d, resizeScene3d, SCENE3D_NONE } from '@core/utils/gpu/scene3d.js'
 import type { Scene3dSurface } from '@core/utils/gpu/scene3d.js'
 import { bindOrbit } from '@core/utils/gpu/orbit-controller.js'
 import type { OrbitController } from '@core/utils/gpu/orbit-controller.js'
@@ -542,11 +542,20 @@ export const mountArchScene3d = async (
   const t0 = performance.now()
 
   let raf = 0
+
+  /**
+   * Host-driven pause — true while the map column is display:none. The
+   * loop stops scheduling entirely (no rAF wakeup, no GPU frame); the
+   * flag is also re-checked at tick entry so a pause that lands between
+   * schedule and fire still dead-ends the frame.
+   */
+  let paused = false
+
   let last = performance.now()
   let t = 0
 
   const tick = (now: number) => {
-    if (disposed) return
+    if (disposed || paused) return
 
     const dt = Math.min(0.05, (now - last) / 1000 || 0.016)
 
@@ -611,6 +620,30 @@ export const mountArchScene3d = async (
       activePath = path
 
       applyActive()
+    },
+
+    // The mount facade already owns a ResizeObserver feeding device-px
+    // resize — this entry-point re-asserts the fit for host-driven moves
+    // (map column ↔ zoom dialog) between observer deliveries.
+    resize() {
+      resizeScene3d(surface, canvas)
+    },
+
+    setPaused(next: boolean) {
+      if (next === paused) return
+
+      paused = next
+
+      if (paused) {
+        cancelAnimationFrame(raf)
+      } else if (!disposed) {
+        // Resume on a fresh fit — the canvas may have re-seated into a
+        // different box while the loop was down.
+        resizeScene3d(surface, canvas)
+
+        last = performance.now()
+        raf = requestAnimationFrame(tick)
+      }
     },
 
     destroy() {

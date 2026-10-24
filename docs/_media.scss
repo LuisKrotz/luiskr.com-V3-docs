@@ -5,14 +5,23 @@
 
 // Mobile GPUs: backdrop blur is expensive — surfaces keep their
 // near-opaque translucent bg and drop only the filter (app.scss contract).
-@media (max-width: $bk-768) {
+@media (max-width: $vw-768) {
   .#{$_B_DOCS}-header,
   .#{$_B_DOCS}-crumbs,
   .#{$_B_DOCS}-nav,
+  .#{$_B_DOCS}-nav-panel,
+  .#{$_B_DOCS}-map,
+  .#{$_B_DOCS}-map-modal,
+  .#{$_B_DOCS}-map-dialog,
   .#{$_B_DOCS}-card,
   .#{$_B_DOCS}-viewer {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
+  }
+
+  // The portal title steps down to the mobile display size (21px).
+  .#{$_B_DOCS}-title {
+    font-size: to-rem($space-xl);
   }
 }
 

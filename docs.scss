@@ -10,6 +10,7 @@
 //    _grid        folder/file grid + generated glyphs
 //    _viewer      translucent file viewer surface
 //    _rendered    markdown/JSON/report content styling
+//    _map         architecture-map column + glass zoom modal
 //    _protected   copy-guard + scene hidden state
 //    _media       mobile backdrop-filter drop + print guard
 // ════════════════════════════════════════════════════════════════════════════
@@ -29,5 +30,6 @@ $_B_DOCS: 'docs';
 @import 'docs/grid';
 @import 'docs/viewer';
 @import 'docs/rendered';
+@import 'docs/map';
 @import 'docs/protected';
 @import 'docs/media';

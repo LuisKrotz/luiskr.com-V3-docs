@@ -66,9 +66,33 @@
     gap: to-rem($space-xl);
     flex: 1;
 
-    @include layout-1024() {
-      grid-template-columns: to-rem($space-7xl) minmax(0, 1fr);
+    // 1025–1280 — the stack cell (combobox nav above content) shares the
+    // row with the right-hand architecture map. The map spans one row so
+    // its sticky height can never inflate the nav row.
+    @media (min-width: #{$vw-1024 + 1px}) and (max-width: #{$vw-1280}) {
+      grid-template-columns: minmax(0, 1fr) to-rem($space-7xl);
       align-items: start;
+    }
+
+    // ≥1281 — the full three-column portal: tree | content | map. The
+    // stack wrapper dissolves (display:contents) so nav, main and map
+    // auto-place into the three tracks in DOM order.
+    @media (min-width: #{$vw-1280 + 1px}) {
+      grid-template-columns: to-rem($space-7xl) minmax(0, 1fr) to-rem($space-7xl);
+      align-items: start;
+    }
+  }
+
+  // The nav+content stack — a real cell ≤1280, transparent ≥1281 so its
+  // children join the body's three-column grid.
+  &-stack {
+    display: flex;
+    flex-direction: column;
+    gap: to-rem($space-sm);
+    min-width: 0;
+
+    @media (min-width: #{$vw-1280 + 1px}) {
+      display: contents;
     }
   }
 

@@ -21,8 +21,9 @@ const VIEW_BOX = '0 0 96 72'
 /**
  * Deterministic 32-bit-ish name hash — walks the string with a rolling
  * multiply-add; the modulus lives in DOCS_UNITS so the spread stays tuned.
+ * Shared with tree-icon.ts so row glyphs and card glyphs spread alike.
  */
-const hashName = (name: string): number => {
+export const hashName = (name: string): number => {
   let h = 0
 
   for (let i = 0; i < name.length; i++) {
