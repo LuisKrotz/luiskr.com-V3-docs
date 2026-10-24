@@ -3,8 +3,9 @@
  * @description Coverage tails for ViewDocs._onPrintPrepare — the printprepare
  * answer that syncs the viewer's rendered DOM (mermaid SVGs, istanbul
  * tables) into the light-DOM reader mirror before the print walk. Covers
- * the no-article bail, the protected-source emptying (exfiltration guard),
- * the empty-content bail, and the happy-path copy with canvas stripping.
+ * the no-article bail, the protected-source guard notice (exfiltration
+ * guard), the empty-content bail, and the happy-path copy with canvas
+ * stripping.
  */
 import { describe, test, expect, beforeEach, afterEach } from '@jest/globals'
 import { ViewDocs } from '@docs/Docs.js'
@@ -98,14 +99,19 @@ describe('Docs print-prepare tails', () => {
     expect(article.querySelector(HTML_TAGS.CANVAS)).toBeNull()
   })
 
-  test('protected source view empties the mirror for the print pass', async () => {
+  test('protected source view replaces the mirror with the guard notice', async () => {
     await mountAt('src/App.tsx')
 
     const article = mkArticle()
 
     firePrepare()
 
-    expect(article.childElementCount).toBe(0)
+    // The payload never prints — the mirror carries only the localized
+    // copy-guard notice so the sheet isn't a literal blank page.
+    expect(article.childElementCount).toBe(1)
+    expect(article.querySelector(HTML_TAGS.P)).not.toBeNull()
+    expect(article.querySelector(HTML_TAGS.SPAN)).toBeNull()
+    expect(article.textContent.trim().length).toBeGreaterThan(0)
   })
 
   test('non-file route without a content box leaves the mirror as emitted', async () => {

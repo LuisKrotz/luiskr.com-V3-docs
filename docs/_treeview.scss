@@ -121,10 +121,11 @@
 
     // Nested levels draw the ASCII-tree shape: a vertical rail running the
     // whole branch (cut to the stub at the last sibling → `└─`) plus a
-    // horizontal stub landing mid-row on each item.
+    // horizontal stub landing mid-row on each item. The deeper indent and
+    // the stronger rails keep the hierarchy legible at a glance.
     ul {
       list-style: none;
-      padding-left: to-rem($space-md);
+      padding-left: to-rem($space-lg);
       margin: 0;
 
       li {
@@ -132,8 +133,8 @@
         &::after {
           content: '';
           position: absolute;
-          left: -#{to-rem($space-sm)};
-          background: color-mix(in srgb, currentColor 24%, transparent);
+          left: -#{to-rem($space-md)};
+          background: color-mix(in srgb, currentColor 34%, transparent);
         }
 
         &::before {
@@ -143,14 +144,14 @@
         }
 
         &::after {
-          top: calc(#{to-rem($space-sm)} + 0.6em);
-          width: to-rem($space-sm);
+          top: calc(#{to-rem($space-sm)} + 0.72em);
+          width: to-rem($space-md);
           height: to-rem($space-hairline);
         }
 
         &:last-child::before {
           bottom: auto;
-          height: calc(#{to-rem($space-sm)} + 0.6em);
+          height: calc(#{to-rem($space-sm)} + 0.72em);
         }
       }
     }
@@ -164,8 +165,9 @@
     text-align: left;
     // Rows are <a href> (crawlable docs routes) — read as buttons did.
     text-decoration: none;
-    // ≥34px row + side padding — a comfortable tap target on touch.
-    padding: to-rem($space-sm) to-rem($space-2xs);
+    // ≥38px row + wider gutters — the extra air is what lets the folder
+    // sheets and the hierarchy rails read at tree density.
+    padding: to-rem($space-sm) to-rem($space-xs);
     width: 100%;
     cursor: pointer;
     white-space: nowrap;
@@ -202,16 +204,83 @@
     }
   }
 
-  // ── Row icons — animated SVG glyphs (folders open/closed + count
-  //    badge; pages keyed by extension). 1em-square, optically aligned
-  //    to the text midline. ────────────────────────────────────────────
+  // ── Row icons — the animated icon pack. Every file kind inks through
+  //    `--icon-ink` (each `--{kind}` modifier maps to a themed palette
+  //    var); folders keep the row's currentColor with paper sheets. ────
   &-tree-icon {
     display: inline-block;
-    width: 1.15em;
-    height: 1.15em;
-    margin-right: to-rem($space-2xs);
-    vertical-align: -0.22em;
+    width: 1.35em;
+    height: 1.35em;
+    margin-right: to-rem($space-xs);
+    vertical-align: -0.3em;
     overflow: visible;
+
+    --icon-ink: var(--text-secondary);
+
+    // The icon pack — each filetype's own ink, all themed vars.
+    &--ts {
+      --icon-ink: var(--color-blue-raw);
+    }
+    &--js {
+      --icon-ink: var(--cov-med-strong);
+    }
+    &--json {
+      --icon-ink: var(--cov-syn-lit);
+    }
+    &--sass {
+      --icon-ink: var(--cov-syn-typ);
+    }
+    &--css {
+      --icon-ink: var(--cov-link);
+    }
+    &--html {
+      --icon-ink: var(--cov-low-strong);
+    }
+    &--md {
+      --icon-ink: var(--text-primary);
+    }
+    &--img {
+      --icon-ink: var(--cov-high-strong);
+    }
+    &--vec {
+      --icon-ink: var(--color-accent-hover);
+    }
+    &--yml {
+      --icon-ink: var(--cov-syn-str);
+    }
+    &--conf {
+      --icon-ink: var(--color-grey-raw);
+    }
+    &--lock {
+      --icon-ink: var(--cov-med-strong);
+    }
+    &--font {
+      --icon-ink: var(--text-secondary);
+    }
+    &--wasm {
+      --icon-ink: var(--cov-syn-kwd);
+    }
+    &--test {
+      --icon-ink: var(--color-accent-contrast);
+    }
+    &--cert {
+      --icon-ink: var(--cov-link);
+    }
+    &--archive {
+      --icon-ink: var(--color-grey-raw);
+    }
+    &--shell {
+      --icon-ink: var(--cov-high-strong);
+    }
+    &--video {
+      --icon-ink: var(--cov-low-strong);
+    }
+    &--audio {
+      --icon-ink: var(--color-accent);
+    }
+    &--doc {
+      --icon-ink: var(--text-secondary);
+    }
 
     &-body,
     &-flap {
@@ -225,32 +294,38 @@
     &-flap {
       opacity: 0.7;
     }
-
-    // Extension tag inside file pages — mono microtype.
-    &-ext {
-      font-family: var(--font-mono);
-      font-size: 5px;
-      fill: currentColor;
-      stroke: none;
-      opacity: 0.8;
-      letter-spacing: 0;
-    }
   }
 
-  // Folder child-count badge — the inked disc + numeral pinned to the
-  // folder's lower corner; the "amount inside" readout.
-  &-tree-count {
-    circle {
-      fill: var(--bg-primary);
-      stroke: currentColor;
-      stroke-width: 0.9;
-    }
+  // Stroked / filled pack parts — inked by the kind's --icon-ink.
+  &-icon-line {
+    fill: none;
+    stroke: var(--icon-ink);
+    stroke-width: 1.4;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
 
-    text {
-      font-family: var(--font-mono);
-      font-size: 6.5px;
-      fill: currentColor;
-      stroke: none;
-    }
+  &-icon-fill {
+    fill: var(--icon-ink);
+    stroke: none;
+  }
+
+  // Details sitting ON a filled tile (TS/JS letterforms) — paper ink so
+  // they read against the kind color in both themes.
+  &-icon-on {
+    fill: none;
+    stroke: var(--bg-primary);
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+
+  // Folder paper sheets — the visual child-count. Paper tone follows the
+  // surface token so the stack reads as real pages in both themes.
+  &-tree-paper {
+    fill: var(--bg-primary);
+    stroke: currentColor;
+    stroke-width: 0.65;
+    opacity: 0.92;
   }
 }

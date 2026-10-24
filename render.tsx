@@ -15,6 +15,9 @@ import { HTML_TAGS } from '@core/tokens/elements/html.js'
 import { FORM_ATTRS } from '@core/tokens/attrs/form.js'
 import { MICRODATA_ATTRS, MICRODATA_VALUES } from '@core/tokens/attrs/microdata.js'
 import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
+import { EXPAND_MODAL_CLASSES } from '@core/tokens/classes/modal.js'
+import { PREF_CLASSES } from '@core/tokens/classes/preferences.js'
+import { STATE_CLASSES } from '@core/tokens/classes/state.js'
 import { DOCS_IDS } from '@core/tokens/ids/docs.js'
 import { ROUTE_PATHS } from '@core/tokens/routes/paths.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
@@ -578,15 +581,15 @@ export const renderDocs = (view: ViewDocs) => {
         </aside>
 
         {/* Map zoom dialog — glass overlay centering the enlarged scene;
-            the stage hosts the same persistent canvas while open.
-            Backdrop clicks (target === the overlay itself) dismiss. */}
+            the stage hosts the same persistent canvas while open. Chrome
+            follows the expand-modal pattern: a fullscreen close-area
+            click-catcher, the close-bar's circular pref-close canvas
+            button (CloseButtonWebGL mounts on it in onUpdated; the CSS X
+            fallback span stays authoritative on no-GL contexts), and a
+            labelled close-bottom under the dialog content. */}
         {view._mapZoomed && (
-          <div
-            className={DOCS_CLASSES.DOCS_MAP_MODAL}
-            onClick={(e: Event) => {
-              if (e.target === e.currentTarget) view.toggleMapZoom()
-            }}
-          >
+          <div className={DOCS_CLASSES.DOCS_MAP_MODAL}>
+            <div className={DOCS_CLASSES.DOCS_MAP_CLOSE_AREA} onClick={() => view.closeMapZoom()} />
             <div
               className={DOCS_CLASSES.DOCS_MAP_DIALOG}
               id={DOCS_IDS.MAP_MODAL}
@@ -598,14 +601,27 @@ export const renderDocs = (view: ViewDocs) => {
                 <span className={DOCS_CLASSES.DOCS_SCENE_HINT}>{DOCS_STRINGS.SCENE_HINT}</span>
                 <button
                   type={FORM_ATTRS.TYPE_BUTTON}
-                  className={DOCS_CLASSES.DOCS_MAP_CLOSE}
+                  className={PREF_CLASSES.PREF_CLOSE_BTN}
                   aria-label={DOCS_STRINGS.MAP_CLOSE}
-                  onClick={() => view.toggleMapZoom()}
+                  onClick={() => view.closeMapZoom()}
                 >
-                  {CHAR_STRINGS.CLOSE_GLYPH}
+                  <canvas
+                    className={`${PREF_CLASSES.PREF_CLOSE_CANVAS} ${STATE_CLASSES.IS_FALLBACK}`}
+                  />
+                  <span
+                    className={EXPAND_MODAL_CLASSES.EXPAND_MODAL_CLOSE_BAR_FALLBACK}
+                    aria-hidden={ATTR_VALUES.TRUE}
+                  />
                 </button>
               </div>
               <div className={DOCS_CLASSES.DOCS_MAP_STAGE} />
+              <button
+                type={FORM_ATTRS.TYPE_BUTTON}
+                className={DOCS_CLASSES.DOCS_MAP_CLOSE_BOTTOM}
+                onClick={() => view.closeMapZoom()}
+              >
+                {DOCS_STRINGS.MAP_CLOSE}
+              </button>
             </div>
           </div>
         )}

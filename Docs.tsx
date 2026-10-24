@@ -13,6 +13,7 @@
  */
 
 import { ARIA_ATTRS } from '@core/tokens/attrs/aria.js'
+import { PREF_CLASSES } from '@core/tokens/classes/preferences.js'
 import { READER_CLASSES } from '@core/tokens/classes/reader.js'
 import { DATA_ATTRS } from '@core/tokens/attrs/data.js'
 import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
@@ -29,6 +30,9 @@ import { BaseComponent } from '@core/Component.js'
 import store from '@core/store.js'
 import { componentText } from '@core/locale/ui-text.js'
 import { devWarn } from '@core/devlog.js'
+import { applyAnimationDesc } from '@core/utils/a11y/animation-desc.js'
+import { ANIMATION_IDS } from '@core/tokens/data/animation-ids.js'
+import { CloseButtonWebGL } from '@core/utils/canvas/widgets/close-button.js'
 import { generateDocsSchema, updateJsonLd } from '@core/utils/schema.js'
 import { isPlainClick } from '@core/utils/dom.js'
 import { BASE_TITLE } from '@core/tokens/routes.js'
@@ -78,6 +82,21 @@ export class ViewDocs extends BaseComponent {
   /** Architecture-map zoom modal — the persistent scene canvas re-seats
    *  into the centered glass dialog while open. */
   _mapZoomed = false
+
+  /**
+   * The dialog's animated close button — a CloseButtonWebGL mounted on
+   * the pref-close canvas each render that produces a fresh dialog. The
+   * widget binds click on the parent button; the DOM onClick does the
+   * same, so closeMapZoom must stay idempotent (double-fire safe).
+   */
+  private _mapCloseBtn: CloseButtonWebGL | null = null
+
+  /**
+   * Focus hand-off consumed by onUpdated: opening the zoom dialog puts
+   * focus on its close button (the expand-modal pattern), closing it
+   * returns focus to the map column's zoom trigger.
+   */
+  private _mapFocus: 'open' | 'close' | null = null
 
   /**
    * Path whose tree/grid button regains focus after the next re-render —
@@ -221,14 +240,38 @@ export class ViewDocs extends BaseComponent {
   }
 
   /**
-   * Map zoom toggle — opens/closes the centered glass dialog. The
-   * persistent scene canvas re-seats into the dialog's stage on the next
-   * render pass (no context loss, no remount); the column keeps its frame.
+   * Map zoom open — the dialog's first-focusable is its close button
+   * (expand-modal pattern: AT/keyboard reach the dismiss affordance
+   * first). The scene canvas re-seats into the dialog stage on the next
+   * render pass — no context loss, no remount.
    */
-  toggleMapZoom(): void {
-    this._mapZoomed = !this._mapZoomed
+  openMapZoom(): void {
+    if (this._mapZoomed) return
+
+    this._mapZoomed = true
+    this._mapFocus = 'open'
 
     this._updateDom()
+  }
+
+  /**
+   * Map zoom close — idempotent: the close button fires this from both
+   * its DOM click and the widget's own listener on the same gesture.
+   * Returns focus to the zoom trigger.
+   */
+  closeMapZoom(): void {
+    if (!this._mapZoomed) return
+
+    this._mapZoomed = false
+    this._mapFocus = 'close'
+
+    this._updateDom()
+  }
+
+  /** Zoom trigger — toggles the dialog (delegates to the explicit arms). */
+  toggleMapZoom(): void {
+    if (this._mapZoomed) this.closeMapZoom()
+    else this.openMapZoom()
   }
 
   /** Expands or collapses a dir in place (keyboard left/right) without navigating. */
@@ -353,9 +396,7 @@ export class ViewDocs extends BaseComponent {
     if (e.key !== KEYS.ESCAPE) return
 
     if (this._mapZoomed) {
-      this._mapZoomed = false
-
-      this._updateDom()
+      this.closeMapZoom()
     } else if (this.filePayload) {
       this.closeFile()
     } else if (this.navOpen) {
@@ -426,11 +467,17 @@ export class ViewDocs extends BaseComponent {
 
     // Protected source views never print — the exfiltration guard blanks
     // the live viewer via @media print, and the emitted mirror carries the
-    // same source payload, so it has to empty for the print pass too. The
+    // same source payload, so it can't reach the print pass either. Instead
+    // of a literal blank sheet the mirror carries the localized guard
+    // notice — the press output still reads as a deliberate result. The
     // check reads the node (not the payload) so a print fired before the
     // fetch lands is still guarded.
     if (this.node && isSourceRoot(fileIdRoot(this.node.id || CHAR_STRINGS.EMPTY))) {
-      article.replaceChildren()
+      const note = document.createElement(HTML_TAGS.P)
+
+      note.textContent = this._toastText()
+
+      article.replaceChildren(note)
 
       return
     }
@@ -490,6 +537,8 @@ export class ViewDocs extends BaseComponent {
     // mounts and on same-canvas navigations (the scene persists).
     this._sceneHandle?.setActive(this.docsPath)
 
+    this._syncMapCloseBtn()
+
     this._syncScenePaused()
 
     // Arrow-key expand/collapse re-creates the DOM — put focus back on
@@ -506,9 +555,56 @@ export class ViewDocs extends BaseComponent {
       target?.focus()
     }
 
+    // Map-zoom focus hand-off — the expand-modal contract: the dialog's
+    // close button takes focus on open; the column's zoom trigger takes
+    // it back on close.
+    if (this._mapFocus) {
+      const mapFocus = this._mapFocus
+
+      this._mapFocus = null
+
+      const focusEl =
+        mapFocus === 'open'
+          ? (this.$(`.${PREF_CLASSES.PREF_CLOSE_BTN}`) as HTMLElement | null)
+          : (this.$(`.${DOCS_CLASSES.DOCS_MAP_ZOOM}`) as HTMLElement | null)
+
+      focusEl?.focus()
+    }
+
     this._renderFilePayload()
 
     this._syncLoader()
+  }
+
+  /**
+   * Mounts/refreshes the zoom dialog's animated close button on its live
+   * canvas — same mount contract as the preferences/expand-modal close
+   * (the canvas is re-created with each render that produces the dialog,
+   * so a stale handle is destroyed and remounted). No dialog → the
+   * widget is destroyed outright so it holds no GL context slot.
+   */
+  private _syncMapCloseBtn(): void {
+    const canvas = this.$(`.${PREF_CLASSES.PREF_CLOSE_CANVAS}`) as HTMLCanvasElement | null
+
+    if (!canvas) {
+      this._mapCloseBtn?.destroy()
+
+      this._mapCloseBtn = null
+
+      return
+    }
+
+    if (this._mapCloseBtn && this._mapCloseBtn.canvas !== canvas) {
+      this._mapCloseBtn.destroy()
+
+      this._mapCloseBtn = null
+    }
+
+    if (!this._mapCloseBtn) {
+      applyAnimationDesc(canvas, ANIMATION_IDS.CLOSE_BUTTON)
+
+      this._mapCloseBtn = new CloseButtonWebGL(canvas, () => this.closeMapZoom())
+    }
   }
 
   /** Mirrors a boot stage into the loader overlay (delegates to loader.ts). */
@@ -654,6 +750,10 @@ export class ViewDocs extends BaseComponent {
 
     this._sceneHandle = null
     this._sceneCanvas = null
+
+    this._mapCloseBtn?.destroy()
+
+    this._mapCloseBtn = null
 
     // The docs JSON-LD graph is page-scoped, but the nav pipeline emits
     // the next route's graph BEFORE this element disconnects — clearing
