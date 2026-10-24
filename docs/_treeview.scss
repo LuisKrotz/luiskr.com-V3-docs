@@ -239,6 +239,9 @@
     vertical-align: -0.3em;
     overflow: visible;
 
+    // Folders ink gold (the reference pack's folder color); file kinds
+    // override via --icon-ink on their --{kind} modifier.
+    color: var(--cov-med-strong);
     --icon-ink: var(--text-secondary);
 
     // The icon pack — each filetype's own ink, all themed vars.
@@ -248,11 +251,45 @@
     &--js {
       --icon-ink: var(--cov-med-strong);
     }
-    &--json {
+    &--py {
+      // Two-tone snake — blue head lobe, yellow tail lobe (the
+      // reference's python mark); other kinds leave --icon-ink2 unset
+      // so -icon-alt falls back to --icon-ink.
+      --icon-ink: var(--color-blue-raw);
+      --icon-ink2: var(--cov-med-strong);
+    }
+    &--atom {
+      --icon-ink: var(--cov-link);
+    }
+    &--rs {
+      --icon-ink: var(--cov-low-strong);
+    }
+    &--go {
+      --icon-ink: var(--color-accent-hover);
+    }
+    &--java {
+      --icon-ink: var(--cov-low-strong);
+    }
+    &--cpp {
+      --icon-ink: var(--color-blue-raw);
+    }
+    &--cs {
       --icon-ink: var(--cov-syn-lit);
     }
+    &--php {
+      --icon-ink: var(--cov-syn-lit);
+    }
+    &--rb {
+      --icon-ink: var(--cov-low-strong);
+    }
+    &--sql {
+      --icon-ink: var(--color-blue-raw);
+    }
+    &--json {
+      --icon-ink: var(--cov-low-strong);
+    }
     &--sass {
-      --icon-ink: var(--cov-syn-typ);
+      --icon-ink: var(--cov-syn-kwd);
     }
     &--css {
       --icon-ink: var(--cov-link);
@@ -260,17 +297,26 @@
     &--html {
       --icon-ink: var(--cov-low-strong);
     }
+    &--xml {
+      --icon-ink: var(--cov-low-strong);
+    }
     &--md {
-      --icon-ink: var(--text-primary);
+      --icon-ink: var(--color-accent-contrast);
     }
     &--img {
+      --icon-ink: var(--color-blue-raw);
+    }
+    &--photo {
+      --icon-ink: var(--color-accent-contrast);
+    }
+    &--gif {
       --icon-ink: var(--cov-high-strong);
     }
     &--vec {
-      --icon-ink: var(--color-accent-hover);
+      --icon-ink: var(--cov-syn-lit);
     }
     &--yml {
-      --icon-ink: var(--cov-syn-str);
+      --icon-ink: var(--cov-low-strong);
     }
     &--conf {
       --icon-ink: var(--color-grey-raw);
@@ -279,10 +325,16 @@
       --icon-ink: var(--cov-med-strong);
     }
     &--font {
-      --icon-ink: var(--text-secondary);
+      --icon-ink: var(--cov-med-strong);
+
+      // The ttf 'A' sets light (the sheet's thin serif-like letter),
+      // not bold like the other wordmarks.
+      .#{$_B_DOCS}-icon-text {
+        font-weight: 300;
+      }
     }
     &--wasm {
-      --icon-ink: var(--cov-syn-kwd);
+      --icon-ink: var(--cov-syn-lit);
     }
     &--test {
       --icon-ink: var(--color-accent-contrast);
@@ -291,47 +343,136 @@
       --icon-ink: var(--cov-link);
     }
     &--archive {
-      --icon-ink: var(--color-grey-raw);
+      --icon-ink: var(--cov-med-strong);
     }
     &--shell {
       --icon-ink: var(--cov-high-strong);
     }
+    &--exe {
+      --icon-ink: var(--color-grey-raw);
+    }
+    &--dmg {
+      --icon-ink: var(--text-secondary);
+    }
     &--video {
-      --icon-ink: var(--cov-low-strong);
+      --icon-ink: var(--color-blue-raw);
     }
     &--audio {
-      --icon-ink: var(--color-accent);
+      --icon-ink: var(--cov-syn-kwd);
+    }
+    &--note {
+      --icon-ink: var(--cov-syn-kwd);
+    }
+    &--cam {
+      --icon-ink: var(--color-blue-raw);
+    }
+    &--crate {
+      --icon-ink: var(--cov-med-strong);
+    }
+    &--web {
+      --icon-ink: var(--color-accent-contrast);
+    }
+    &--txt {
+      --icon-ink: var(--text-secondary);
+    }
+    &--pdf {
+      --icon-ink: var(--cov-low-strong);
+    }
+    &--docx {
+      --icon-ink: var(--color-blue-raw);
+    }
+    &--xlsx {
+      --icon-ink: var(--cov-high-strong);
+    }
+    &--ppt {
+      --icon-ink: var(--cov-low-strong);
+    }
+    &--csv {
+      --icon-ink: var(--cov-high-strong);
     }
     &--doc {
       --icon-ink: var(--text-secondary);
     }
+  }
 
-    // Filled folder parts — the back plate/body carries a faint wash and
-    // the front face/flap a stronger one, so the glyph reads as a solid
-    // mac/Windows folder rather than a wireframe outline.
+  // File page shell — the folded-corner document every kind draws on:
+  // near-transparent interior, FULL-ink hairline outline (the reference
+  // pack's saturated page rims) and a lightly tinted fold flap.
+  // These live at the .docs level — the emitted part classes are
+  // `docs-icon-*`, not `docs-tree-icon-*` descendants.
+  &-icon-page {
+    fill: color-mix(in srgb, var(--icon-ink) 6%, transparent);
+    stroke: var(--icon-ink);
+    stroke-width: 0.5;
+    stroke-linejoin: round;
+  }
+
+  &-icon-page-fold {
+    fill: none;
+    stroke: var(--icon-ink);
+    stroke-width: 0.45;
+    stroke-linejoin: round;
+    opacity: 0.85;
+  }
+
+  &-icon-page-flap {
+    fill: color-mix(in srgb, var(--icon-ink) 18%, transparent);
+    stroke: none;
+  }
+
+  // Folder wireframe — the reference folders are single-stroke
+  // outlines: the body gets a ≤5% wash, the swung-forward flap ≤8%.
+  &-tree-icon {
     &-body {
-      fill: color-mix(in srgb, currentColor 10%, transparent);
+      fill: color-mix(in srgb, currentColor 5%, transparent);
       stroke: currentColor;
-      stroke-width: 1.2;
+      stroke-width: 0.6;
       stroke-linejoin: round;
     }
 
-    &-face,
     &-flap {
-      fill: color-mix(in srgb, currentColor 20%, transparent);
+      fill: color-mix(in srgb, currentColor 8%, transparent);
       stroke: currentColor;
-      stroke-width: 1.2;
+      stroke-width: 0.6;
       stroke-linejoin: round;
     }
   }
 
-  // Stroked / filled pack parts — inked by the kind's --icon-ink.
+  // Stroked / filled pack parts — inked by the kind's --icon-ink, the
+  // bolder ~0.85-unit weight the reference glyphs carry inside the
+  // hairline page outline.
   &-icon-line {
     fill: none;
     stroke: var(--icon-ink);
-    stroke-width: 1.4;
+    stroke-width: 0.85;
     stroke-linejoin: round;
     stroke-linecap: round;
+  }
+
+  // Secondary-ink strokes — two-tone glyphs like the python snake ink
+  // the tail from --icon-ink2 (kinds that don't set it fall back to
+  // --icon-ink via the var default).
+  &-icon-alt {
+    fill: none;
+    stroke: var(--icon-ink2, var(--icon-ink));
+    stroke-width: 0.85;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+
+  // Wordmark text — the bold geometric letterforms the reference pack
+  // sets inside its pages ("JS", "PHP", "C#", the shield "5"/"3",
+  // "YML"…). Glyphs position + scale via transform on the element, so
+  // one rule covers every size of mark. Inside the 24-unit viewBox the
+  // `px` here resolves to SVG user units (it scales with the icon) —
+  // it is glyph geometry, not a layout dimension.
+  &-icon-text {
+    fill: var(--icon-ink);
+    stroke: none;
+    font-size: 6px;
+    font-weight: 700;
+    font-family: var(--font-primary);
+    letter-spacing: 0.02em;
   }
 
   &-icon-fill {
@@ -344,17 +485,39 @@
   &-icon-on {
     fill: none;
     stroke: var(--bg-primary);
-    stroke-width: 1.5;
+    stroke-width: 0.7;
     stroke-linejoin: round;
     stroke-linecap: round;
   }
 
-  // Folder paper sheets — the visual child-count. Paper tone follows the
-  // surface token so the stack reads as real pages in both themes.
+  // Folder paper sheets — thin transparent outlines like the reference
+  // pack (the sheet interior stays see-through; only the rim draws).
+  // Closed folders use them as plain gold page tops; the open folder's
+  // fanned sheets each take a different filetype ink via --N tones.
   &-tree-paper {
-    fill: var(--bg-primary);
+    fill: color-mix(in srgb, var(--bg-primary) 30%, transparent);
     stroke: currentColor;
-    stroke-width: 0.65;
-    opacity: 0.92;
+    stroke-width: 0.45;
+    opacity: 0.9;
+
+    &--0 {
+      fill: color-mix(in srgb, var(--cov-low-strong) 8%, transparent);
+      stroke: var(--cov-low-strong);
+    }
+
+    &--1 {
+      fill: color-mix(in srgb, var(--color-blue-raw) 8%, transparent);
+      stroke: var(--color-blue-raw);
+    }
+
+    &--2 {
+      fill: color-mix(in srgb, var(--cov-high-strong) 8%, transparent);
+      stroke: var(--cov-high-strong);
+    }
+
+    &--3 {
+      fill: color-mix(in srgb, var(--cov-syn-lit) 8%, transparent);
+      stroke: var(--cov-syn-lit);
+    }
   }
 }

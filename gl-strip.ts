@@ -22,8 +22,10 @@ import {
   type QuadGLResources,
 } from '@core/utils/canvas/gl-lifecycle.js'
 import { parseCssColor } from '@core/utils/canvas/css-color.js'
+import { COMMON_ATTRS } from '@core/tokens/attrs/common.js'
 import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
 import { DOCS_UNITS } from '@core/tokens/strings/docs.js'
+import { TYPE_STRINGS } from '@core/tokens/strings/types.js'
 
 /** Live GL resources for the mounted strip. */
 export interface DocsGlHandle {
@@ -37,10 +39,13 @@ const VS = `attribute vec2 a_pos;varying vec2 v_uv;void main(){v_uv=a_pos*.5+.5;
 /**
  * Fragment shader — threads: distance from `fract` of a warped sine field
  * gives evenly spaced iso-contours; two field octaves + slow time drift
- * keep the line pattern organic. Output alpha stays low so the strip
- * never competes with the crumb labels.
+ * keep the line pattern organic. The backdrop blend happens IN SHADER —
+ * the output is opaque (alpha 1) so the strip never depends on canvas
+ * alpha compositing, BLEND state, premultiplied interpretation, or
+ * drawing-buffer preservation: an opaque field cannot accumulate into
+ * a veil on any driver.
  */
-const FS = `precision mediump float;varying vec2 v_uv;uniform float u_t;uniform vec2 u_res;uniform vec3 u_col;void main(){vec2 p=v_uv*vec2(u_res.x/u_res.y,1.)*3.;float f=sin(p.x*1.7+sin(p.y*2.3+u_t*.6)*1.3+u_t*.35)+sin(p.y*2.1+sin(p.x*1.9-u_t*.4)*1.1-u_t*.3);float lines=smoothstep(.04,.008,abs(fract(f*.5)-.5));gl_FragColor=vec4(u_col,lines*.11);}`
+const FS = `precision mediump float;varying vec2 v_uv;uniform float u_t;uniform vec2 u_res;uniform vec3 u_col;uniform vec3 u_bg;void main(){vec2 p=v_uv*vec2(u_res.x/u_res.y,1.)*3.;float f=sin(p.x*1.7+sin(p.y*2.3+u_t*.6)*1.3+u_t*.35)+sin(p.y*2.1+sin(p.x*1.9-u_t*.4)*1.1-u_t*.3);float lines=smoothstep(.04,.008,abs(fract(f*.5)-.5));gl_FragColor=vec4(mix(u_bg,u_col,lines*.11),1.);}`
 
 /**
  * Mounts the animated strip on `canvas`.
@@ -70,7 +75,12 @@ export const mountDocsGlStrip = (
 
   const res: QuadGLResources = { gl, program: built.program, quadBuffer: built.quadBuffer }
 
-  const uniforms = getUniforms(gl, built.program, { t: 'u_t', r: 'u_res', c: 'u_col' })
+  const uniforms = getUniforms(gl, built.program, {
+    t: 'u_t',
+    r: 'u_res',
+    c: 'u_col',
+    b: 'u_bg',
+  })
 
   const aPos = gl.getAttribLocation(built.program, 'a_pos')
 
@@ -80,7 +90,30 @@ export const mountDocsGlStrip = (
 
   const start = performance.now()
 
-  const color = parseCssColor(getComputedStyle(canvas).color) || [0, 0, 0]
+  /**
+   * Samples the strip's two inks — the thread ink is the canvas' own
+   * `color` (`--text-primary` via CSS); the backdrop is the document's
+   * painted background (`--bg-primary` on body), which the shader mixes
+   * toward so the opaque output is visually identical to a translucent
+   * strip. Re-run on every `html.dark-mode` flip via the observer below.
+   */
+  let color = parseCssColor(getComputedStyle(canvas).color) || [0, 0, 0]
+
+  let bg = parseCssColor(getComputedStyle(document.body).backgroundColor) || [0, 0, 0]
+
+  const themeObserver =
+    typeof MutationObserver === TYPE_STRINGS.FUNCTION
+      ? new MutationObserver(() => {
+          color = parseCssColor(getComputedStyle(canvas).color) || color
+
+          bg = parseCssColor(getComputedStyle(document.body).backgroundColor) || bg
+        })
+      : null
+
+  themeObserver?.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: [COMMON_ATTRS.CLASS],
+  })
 
   const frame = () => {
     if (lost) return
@@ -103,6 +136,15 @@ export const mountDocsGlStrip = (
 
     g.useProgram(res.program)
 
+    // Belt-and-suspenders against the accumulated-alpha veil: re-assert
+    // the blend disable and clear the buffer every frame so no shared-
+    // context state or driver quirk can rebuild the opaque layer.
+    g.disable(g.BLEND)
+
+    g.clearColor(0, 0, 0, 0)
+
+    g.clear(g.COLOR_BUFFER_BIT)
+
     bindQuad(g, res.quadBuffer as WebGLBuffer, aPos)
 
     g.uniform1f(uniforms.t, ((performance.now() - start) / 1000) * DOCS_UNITS.GL_STRIP_TIME_SCALE)
@@ -110,6 +152,8 @@ export const mountDocsGlStrip = (
     g.uniform2f(uniforms.r, w, hgt)
 
     g.uniform3f(uniforms.c, color[0], color[1], color[2])
+
+    g.uniform3f(uniforms.b, bg[0], bg[1], bg[2])
 
     g.drawArrays(g.TRIANGLES, 0, 6)
 
@@ -129,6 +173,8 @@ export const mountDocsGlStrip = (
   return {
     destroy() {
       lost = true
+
+      themeObserver?.disconnect()
 
       cancelAnimationFrame(raf)
 

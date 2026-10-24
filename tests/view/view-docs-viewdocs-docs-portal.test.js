@@ -536,6 +536,29 @@ describe('ViewDocs — docs portal', () => {
     expect(pushed).toContain(`${ROUTE_PATHS.DOCS}/docs/architecture`)
   })
 
+  test('closeFile on index.html climbs past the owning dir (two levels)', async () => {
+    // The dir auto-opens its index — back from the file must land on the
+    // grandparent, or the dir re-opens the same index and the button loops.
+    view.onRouteParamChange({ params: { docsPath: 'docs/sassdoc/index.html' } })
+    await flush()
+
+    view.closeFile()
+    await flush()
+
+    expect(pushed).toContain(`${ROUTE_PATHS.DOCS}/docs`)
+    expect(pushed).not.toContain(`${ROUTE_PATHS.DOCS}/docs/sassdoc`)
+
+    // Under a source root index.html is a plain file — one level up.
+    pushed.length = 0
+    view.onRouteParamChange({ params: { docsPath: 'src/index.html' } })
+    await flush()
+
+    view.closeFile()
+    await flush()
+
+    expect(pushed).toContain(`${ROUTE_PATHS.DOCS}/src`)
+  })
+
   test('editable breadcrumb: Enter commits the typed path, Escape restores', async () => {
     const input = view.shadowRoot.querySelector(`.${DOCS_CLASSES.DOCS_CRUMB_EDIT}`)
 

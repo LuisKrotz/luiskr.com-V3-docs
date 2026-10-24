@@ -136,8 +136,22 @@ const patchNodeMaterial = (mat: THREE.MeshBasicMaterial, pulseTime: { value: num
 }
 
 /**
+ * Subtree node count — the balloon-layout weight. Recursive per the
+ * self-similar-traversal rule; each node's weight is computed once, at
+ * the level that allocates its parent's sector.
+ * @param node Manifest node whose subtree is weighed.
+ * @returns Total nodes in the subtree, self included (min 1).
+ */
+const subtreeWeight = (node: DocsNode): number =>
+  1 + (node.children?.reduce((sum, child) => sum + subtreeWeight(child), 0) ?? 0)
+
+/**
  * Flattens the manifest tree into positioned node descriptors: depth sets
- * the ring radius, sibling order spreads the angle. Recursive per the
+ * the ring radius, sibling order spreads the angle. Sectors split
+ * proportionally to subtree weight (balloon-tree), not sibling count —
+ * a 300-file branch gets the angular room its leaf count needs while a
+ * single-file branch takes a thin slice; equal splits are what packed
+ * dense subtrees into unreadable blobs. Recursive per the
  * self-similar-traversal rule.
  */
 export const layoutNodes = (
@@ -148,18 +162,29 @@ export const layoutNodes = (
   parent = -1,
   acc: PlacedNode[] = []
 ): PlacedNode[] => {
-  const span = (to - from) / Math.max(nodes.length, 1)
+  const weights = nodes.map(subtreeWeight)
+
+  const total = Math.max(
+    weights.reduce((sum, w) => sum + w, 0),
+    1
+  )
+
+  let cursor = from
 
   nodes.forEach((node, i) => {
-    const angle = from + span * (i + 0.5)
+    const span = (to - from) * ((weights[i] as number) / total)
+
+    const angle = cursor + span / 2
 
     const idx = acc.length
 
     acc.push({ node, depth, angle, parent })
 
     if (node.children?.length) {
-      layoutNodes(node.children, depth + 1, angle - span / 2, angle + span / 2, idx, acc)
+      layoutNodes(node.children, depth + 1, cursor, cursor + span, idx, acc)
     }
+
+    cursor += span
   })
 
   return acc
@@ -168,8 +193,10 @@ export const layoutNodes = (
 /**
  * Main-thread twin of the DOCS_SCENE_LAYOUT worker op — the batch
  * fallback for when the wasm pool is unavailable (tests, worker-less
- * environments). Ring radius grows with depth; y alternates per ring and
- * adds a slow sine wave for vertical separation.
+ * environments). Ring radius grows with depth; y carries the depth band
+ * plus a golden-angle hash of the node index — sin(i·φ) decorrelates
+ * consecutive nodes so same-ring siblings scatter vertically instead of
+ * welding into a flat disc of dots.
  * @param depths Ring depth per node.
  * @param angles Ring angle (radians) per node.
  * @returns Flat xyz triplets in node order.
@@ -183,7 +210,7 @@ const layoutPositionsJs = (depths: number[], angles: number[]): Float32Array => 
     xyz[i * 3] = Math.cos(angles[i]) * r
     xyz[i * 3 + 1] =
       ((depths[i] % 3) - 1) * DOCS_UNITS.SCENE_Y_STEP +
-      Math.sin(angles[i] * 2) * DOCS_UNITS.SCENE_Y_WAVE
+      Math.sin(i * DOCS_UNITS.SCENE_Y_HASH) * DOCS_UNITS.SCENE_Y_WAVE
     xyz[i * 3 + 2] = Math.sin(angles[i]) * r
   }
 
@@ -316,12 +343,54 @@ export const readCamState = (): SceneCamState | null => {
  * @returns Scene handle, or null when WebGL is unavailable.
  */
 /**
+ * Collapses each dir's file leaves past SCENE_FILE_CAP into one
+ * `+N` aggregate leaf — hundreds of per-file spheres fanning off a
+ * single parent are the map's "comb" hairball; beyond a handful the
+ * dots carry no nav value (the tree list owns per-file navigation).
+ * The aggregate keeps the parent dir's path, so picking it navigates
+ * to the dir and the highlight pass lights it whenever the dir (or
+ * anything under it) is active. Subtree weights shrink accordingly,
+ * which is what frees the angular room the dense branches needed.
+ * Recursive per the self-similar-traversal rule; returns fresh nodes —
+ * the manifest tree itself is never mutated.
+ * @param node Dir whose children are capped.
+ * @returns The same node with capped (copied) children.
+ */
+const capSceneLeaves = (node: DocsNode, depth = 1): DocsNode => {
+  const kids = node.children
+
+  if (!kids?.length) return node
+
+  // The cap shrinks with depth — buckets can afford a handful of leaf
+  // dots, but out at rings 4-5 the leaves are pure comb noise, so they
+  // all collapse into the `+N` aggregate.
+  const cap = Math.max(0, DOCS_UNITS.SCENE_FILE_CAP - depth * DOCS_UNITS.SCENE_FILE_CAP_STEP)
+
+  const files = kids.filter((c) => c.type === 'file')
+
+  const shown = new Set(files.slice(0, cap))
+
+  const children = kids
+    .filter((c) => c.type !== 'file' || shown.has(c))
+    .map((c) => (c.type === 'file' ? c : capSceneLeaves(c, depth + 1)))
+
+  const hidden = files.length - shown.size
+
+  if (hidden > 0) {
+    children.push({ type: 'file', name: `+${hidden}`, path: node.path })
+  }
+
+  return { ...node, children }
+}
+
+/**
  * The manifest buckets hang off a synthetic center node — the portal
  * root level IS the tree root, so the scene reads as one rooted graph
  * (center = "In-depth project docs", ring 1 = the four buckets, …).
  * Buckets are { root, label, children } — mapped to dir nodes here so
  * they carry a real path (pickable + highlightable) and a real label.
- * Shared by the three.js and scene3d arms.
+ * File leaves are capped per dir (capSceneLeaves) so giant coverage
+ * dirs don't weld into combs. Shared by the three.js and scene3d arms.
  * @param roots Manifest root buckets.
  * @returns The flattened placed tree.
  */
@@ -333,12 +402,14 @@ export const placeRoots = (
       type: 'dir',
       name: DOCS_STRINGS.TITLE,
       path: CHAR_STRINGS.EMPTY,
-      children: roots.map((r) => ({
-        type: 'dir' as const,
-        name: r.label,
-        path: r.root,
-        children: r.children,
-      })),
+      children: roots.map((r) =>
+        capSceneLeaves({
+          type: 'dir' as const,
+          name: r.label,
+          path: r.root,
+          children: r.children,
+        })
+      ),
     },
   ])
 
@@ -632,7 +703,10 @@ export const mountArchSceneThree = (
 
       positions.push(pos)
 
-      nodeTargets.set(node.path, { pos, depth })
+      // First write wins — the `+N` aggregate leaves share their parent
+      // dir's path, and a leaf overwriting the dir's own target would
+      // drag the focus glide one ring out off-center.
+      if (!nodeTargets.has(node.path)) nodeTargets.set(node.path, { pos, depth })
 
       if (node.type !== 'file') {
         dirPlaced.push(i)

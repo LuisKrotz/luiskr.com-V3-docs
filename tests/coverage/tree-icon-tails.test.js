@@ -35,18 +35,19 @@ describe('treeIcon — node-shape arms', () => {
     expect(svg.querySelectorAll(PAPER).length).toBe(0)
   })
 
-  test('an open dir draws the mouth plate + flap and one paper per child', () => {
+  test('an open dir draws the mouth plate + flap and one toned paper per child', () => {
     const children = [{ type: 'file', name: 'a.md', path: 'docs/full/a.md' }]
 
     const svg = treeIcon({ type: 'dir', name: 'full', path: 'docs/full', children }, true)
 
     expect(svg.querySelector(FLAP)).toBeTruthy()
     expect(svg.querySelectorAll(PAPER).length).toBe(1)
-    // The lone (top) sheet carries the bob animation.
-    expect(svg.querySelector(`${PAPER} animateTransform`)).toBeTruthy()
+    // The lone (front) sheet fans out in its tone modifier + bob group.
+    expect(svg.querySelector(`g animateTransform`)).toBeTruthy()
+    expect(svg.querySelector(`.${DOCS_CLASSES.DOCS_TREE_PAPER_TONES[0]}`)).toBeTruthy()
   })
 
-  test('a closed dir with many children caps the paper stack', () => {
+  test('a closed dir with many children caps the peeking page tops', () => {
     const children = Array.from({ length: 7 }, (_, i) => ({
       type: 'file',
       name: `f${i}.ts`,
@@ -55,9 +56,26 @@ describe('treeIcon — node-shape arms', () => {
 
     const svg = treeIcon({ type: 'dir', name: 'many', path: 'docs/many', children }, false)
 
-    // 7 children → capped stack (TREE_SHEET_CAP), still no flap.
-    expect(svg.querySelectorAll(PAPER).length).toBe(5)
+    // 7 children → capped stack (TREE_SHEET_CAP_CLOSED), still no flap.
+    expect(svg.querySelectorAll(PAPER).length).toBe(3)
     expect(svg.querySelector(FLAP)).toBeFalsy()
+  })
+
+  test('an open dir fans more sheets than the closed cap allows', () => {
+    const children = Array.from({ length: 6 }, (_, i) => ({
+      type: 'file',
+      name: `f${i}.ts`,
+      path: `docs/wide/f${i}.ts`,
+    }))
+
+    const svg = treeIcon({ type: 'dir', name: 'wide', path: 'docs/wide', children }, true)
+
+    // 6 children → capped fan (TREE_SHEET_CAP_OPEN), each sheet toned.
+    expect(svg.querySelectorAll(PAPER).length).toBe(4)
+
+    for (const tone of DOCS_CLASSES.DOCS_TREE_PAPER_TONES) {
+      expect(svg.querySelector(`.${tone}`)).toBeTruthy()
+    }
   })
 
   test('a middling dir shows a mid-height stack', () => {
@@ -81,9 +99,25 @@ describe('treeIcon — node-shape arms', () => {
       ['site.json', KINDS.JSON],
       ['theme.scss', KINDS.SASS],
       ['base.css', KINDS.CSS],
-      ['index.html', KINDS.HTML],
+      ['page.html', KINDS.HTML],
+      ['index.html', KINDS.WEB],
+      ['snake.py', KINDS.PY],
+      ['widget.tsx', KINDS.ATOM],
+      ['comp.jsx', KINDS.ATOM],
+      ['lib.rs', KINDS.RS],
+      ['main.go', KINDS.GO],
+      ['Main.java', KINDS.JAVA],
+      ['mod.cpp', KINDS.CPP],
+      ['Mod.cs', KINDS.CS],
+      ['entry.php', KINDS.PHP],
+      ['gem.rb', KINDS.RB],
+      ['q.sql', KINDS.SQL],
+      ['feed.xml', KINDS.XML],
       ['README.md', KINDS.MD],
       ['cover.png', KINDS.IMG],
+      ['shot.jpg', KINDS.PHOTO],
+      ['scan.jpeg', KINDS.PHOTO],
+      ['loop.gif', KINDS.GIF],
       ['icon.svg', KINDS.VEC],
       ['ci.yml', KINDS.YML],
       ['app.toml', KINDS.CONF],
@@ -92,8 +126,20 @@ describe('treeIcon — node-shape arms', () => {
       ['engine.wasm', KINDS.WASM],
       ['pack.zip', KINDS.ARCHIVE],
       ['deploy.sh', KINDS.SHELL],
+      ['setup.exe', KINDS.EXE],
+      ['vol.dmg', KINDS.DMG],
       ['clip.webm', KINDS.VIDEO],
-      ['theme.mp3', KINDS.AUDIO],
+      ['clip.mov', KINDS.CAM],
+      ['song.mp3', KINDS.NOTE],
+      ['theme.wav', KINDS.AUDIO],
+      ['lib.tar.gz', KINDS.CRATE],
+      ['dist.tgz', KINDS.CRATE],
+      ['notes.txt', KINDS.TXT],
+      ['paper.pdf', KINDS.PDF],
+      ['letter.docx', KINDS.DOCX],
+      ['book.xlsx', KINDS.XLSX],
+      ['deck.pptx', KINDS.PPT],
+      ['table.csv', KINDS.CSV],
       ['LICENSE', KINDS.CERT],
       ['Makefile', KINDS.CONF],
       ['CHANGELOG', KINDS.MD],

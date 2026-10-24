@@ -142,11 +142,20 @@ describe('renderFile', () => {
     expect(renderFile('json', '{bad', 'json')).toContain('{bad')
   })
 
-  test('code wraps in <pre> with the language class', () => {
+  test('code wraps in <pre> with the language class and syntax spans', () => {
     const html = renderFile('code', 'const x = 1', 'ts')
 
     expect(html).toContain('lang-typescript')
-    expect(html).toContain('const x = 1')
+    // The build-time highlighter wraps tokens in prettify-classed spans.
+    expect(html).toContain('<span class="kwd">const</span>')
+    expect(html).toContain('<span class="lit">1</span>')
+  })
+
+  test('code highlighter escapes markup inside tokens', () => {
+    const html = renderFile('code', 'const s = "<b>"', 'ts')
+
+    expect(html).not.toContain('<b>')
+    expect(html).toContain('&lt;b&gt;')
   })
 
   test('unknown formats land on the text fallback', () => {

@@ -18,18 +18,18 @@ const FACE = `.${DOCS_CLASSES.DOCS_TREE_ICON}-face`
 const dir = (name, children = []) => ({ type: 'dir', name, path: `docs/${name}`, children })
 
 describe('generated folder artwork', () => {
-  test('dir glyph draws the filled folder silhouette', () => {
+  test('dir glyph draws the wireframe folder silhouette', () => {
     const svg = treeIcon(dir('architecture'), false)
 
     expect(svg.matches('svg')).toBe(true)
     expect(svg.matches(ICON)).toBe(true)
-    // mac/Windows-style: back plate + filled front face (closed state).
+    // Reference-pack wireframe: a single body outline — no filled face.
     expect(svg.querySelector(BODY)).toBeTruthy()
-    expect(svg.querySelector(FACE)).toBeTruthy()
+    expect(svg.querySelector(FACE)).toBeFalsy()
     expect(svg.querySelector(FLAP)).toBeFalsy()
   })
 
-  test('open dir swaps the front face for the swung-open flap', () => {
+  test('open dir swaps the closed body for plate + swung-open flap', () => {
     const svg = treeIcon(
       dir('open', [{ type: 'file', name: 'a.md', path: 'docs/open/a.md' }]),
       true

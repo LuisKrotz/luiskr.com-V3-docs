@@ -225,9 +225,22 @@ export class ViewDocs extends BaseComponent {
     }
   }
 
-  /** Back button — navigates to the file's parent folder (or the root). */
+  /**
+   * Back button — navigates to the file's parent folder (or the root).
+   * A non-source index.html IS the folder's open state: its parent dir
+   * re-opens it on entry (_applyPath), so back must climb past the
+   * owning dir to the grandparent — otherwise the button loops on the
+   * same file. Under source roots index.html is a plain file: one level.
+   */
   closeFile(): void {
-    const parent = this.docsPath.split(CHAR_STRINGS.SLASH).slice(0, -1).join(CHAR_STRINGS.SLASH)
+    const segments = this.docsPath.split(CHAR_STRINGS.SLASH)
+
+    const isAutoIndex =
+      this.node?.type === 'file' &&
+      this.node.name === DOCS_STRINGS.INDEX_FILE &&
+      !isSourceRoot(segments[0] as string)
+
+    const parent = segments.slice(0, isAutoIndex ? -2 : -1).join(CHAR_STRINGS.SLASH)
 
     this.navigateDocs(parent)
   }

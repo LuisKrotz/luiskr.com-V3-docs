@@ -1427,4 +1427,167 @@ describe('docs architecture scene', () => {
 
     globalThis.ResizeObserver = origRO
   })
+
+  test('file leaves past SCENE_FILE_CAP collapse into a +N aggregate leaf', () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({
+      type: 'file',
+      name: `f${i}.md`,
+      path: `docs/blob/f${i}.md`,
+      id: `docs:blob/f${i}.md`,
+    }))
+
+    const placed = placeRoots([
+      {
+        root: 'docs',
+        label: 'Documentation',
+        children: [{ type: 'dir', name: 'blob', path: 'docs/blob', children: many }],
+      },
+    ])
+
+    const files = placed.filter((p) => p.node.type === 'file')
+
+    // The cap scales down with depth — `blob` sits at ring 2, so its
+    // shown-leaf allowance is CAP - 2·STEP, plus exactly one aggregate.
+    const cap = Math.max(0, DOCS_UNITS.SCENE_FILE_CAP - 2 * DOCS_UNITS.SCENE_FILE_CAP_STEP)
+
+    expect(files.length).toBe(cap + 1)
+
+    const agg = files.find((p) => p.node.name.startsWith('+'))
+
+    expect(agg).toBeTruthy()
+    expect(agg.node.name).toBe(`+${25 - cap}`)
+
+    // The aggregate shares the parent dir's path — picking it navigates
+    // to the dir, and it lights as an ancestor of any active leaf.
+    expect(agg.node.path).toBe('docs/blob')
+  })
+
+  test('dirs without children pass capSceneLeaves through unchanged', () => {
+    const placed = placeRoots([
+      {
+        root: 'docs',
+        label: 'Documentation',
+        children: [
+          // No `children` key at all — the `kids?.length` optional chain
+          // short-circuits on a nullish child list.
+          { type: 'dir', name: 'hollow', path: 'docs/hollow' },
+          // Empty array — `!kids.length` early-return on a real list.
+          { type: 'dir', name: 'vacant', path: 'docs/vacant', children: [] },
+          // A dir holding only subdirs — no file leaves to cap, no +N.
+          {
+            type: 'dir',
+            name: 'nest',
+            path: 'docs/nest',
+            children: [{ type: 'dir', name: 'inner', path: 'docs/nest/inner', children: [] }],
+          },
+        ],
+      },
+    ])
+
+    const paths = placed.map((p) => p.node.path)
+
+    expect(paths).toEqual(
+      expect.arrayContaining(['docs/hollow', 'docs/vacant', 'docs/nest', 'docs/nest/inner'])
+    )
+
+    // Nothing was hidden, so no +N aggregate appears anywhere.
+    expect(placed.some((p) => p.node.name.startsWith('+'))).toBe(false)
+  })
+
+  test('a files-only dir at a deep ring collapses to the +N aggregate only', () => {
+    const files = Array.from({ length: 8 }, (_, i) => ({
+      type: 'file',
+      name: `g${i}.md`,
+      path: `docs/a/b/c/d/g${i}.md`,
+      id: `docs:a/b/c/d/g${i}.md`,
+    }))
+
+    // Chain a..d pushes the files-only dir out to capSceneLeaves depth
+    // 4, where CAP - 4·STEP clamps at 0 — every leaf hides behind +N.
+    const placed = placeRoots([
+      {
+        root: 'docs',
+        label: 'Documentation',
+        children: [
+          {
+            type: 'dir',
+            name: 'a',
+            path: 'docs/a',
+            children: [
+              {
+                type: 'dir',
+                name: 'b',
+                path: 'docs/a/b',
+                children: [
+                  {
+                    type: 'dir',
+                    name: 'c',
+                    path: 'docs/a/b/c',
+                    children: [{ type: 'dir', name: 'd', path: 'docs/a/b/c/d', children: files }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ])
+
+    const leaves = placed.filter((p) => p.node.type === 'file' && p.node.path === 'docs/a/b/c/d')
+
+    // Zero shown leaves + exactly one aggregate carrying the dir path.
+    expect(leaves.length).toBe(1)
+    expect(leaves[0].node.name).toBe(`+${files.length}`)
+  })
+
+  test('a mounted scene keeps the dir target when a +N leaf reuses its path', async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({
+      type: 'file',
+      name: `f${i}.md`,
+      path: `docs/blob/f${i}.md`,
+      id: `docs:blob/f${i}.md`,
+    }))
+
+    const fatRoots = [
+      {
+        root: 'docs',
+        label: 'Documentation',
+        children: [{ type: 'dir', name: 'blob', path: 'docs/blob', children: many }],
+      },
+    ]
+
+    const canvas = document.createElement(HTML_TAGS.CANVAS)
+
+    document.body.appendChild(canvas)
+
+    // The +N leaf shares 'docs/blob' with the dir node — buildGraph's
+    // first-write-wins guard skips the duplicate on the second pass.
+    const handle = mountArchScene(canvas, fatRoots, jest.fn())
+
+    expect(handle).not.toBe(null)
+
+    await flush()
+
+    handle.destroy()
+    canvas.remove()
+  })
+
+  test('destroy before the async graph build leaves the tiers empty', async () => {
+    const canvas = document.createElement(HTML_TAGS.CANVAS)
+
+    document.body.appendChild(canvas)
+
+    const handle = mountArchScene(canvas, ROOTS, jest.fn())
+
+    expect(handle).not.toBe(null)
+
+    // Positions resolve on a microtask — tearing down first leaves the
+    // instanced tiers null and trips buildGraph's disposed guard.
+    handle.setActive('docs')
+    handle.destroy()
+
+    await flush()
+
+    canvas.remove()
+  })
 })

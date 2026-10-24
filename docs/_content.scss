@@ -31,13 +31,10 @@
     margin-bottom: to-rem($space-xl);
     // Vertical pad only — horizontal padding must come from %MAXAREA's
     // grid gutter, or the title/timestamp detach from the content column
-    // edges and the header reads unaligned on every breakpoint.
+    // edges and the header reads unaligned on every breakpoint. The title
+    // sits directly on the page surface — no card backdrop.
     padding-top: to-rem($space-2xs);
     padding-bottom: to-rem($space-2xs);
-    background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
-    -webkit-backdrop-filter: blur(to-rem($space-xs));
-    backdrop-filter: blur(to-rem($space-xs));
-    border-radius: var(--radius-md);
   }
 
   &-title {

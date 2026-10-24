@@ -191,4 +191,183 @@ describe('docs GL strip', () => {
     canvas.remove()
     host.remove()
   })
+
+  test('theme observer re-samples inks on mutation and disconnects on destroy', async () => {
+    const origMO = globalThis.MutationObserver
+    const origGCS = globalThis.getComputedStyle
+
+    let moCb = null
+    let disconnects = 0
+
+    globalThis.MutationObserver = class {
+      constructor(cb) {
+        moCb = cb
+      }
+
+      observe() {}
+      disconnect() {
+        disconnects++
+      }
+    }
+
+    let ink = 'rgb(10, 20, 30)'
+    let bgc = 'rgb(40, 50, 60)'
+
+    globalThis.getComputedStyle = (el) =>
+      el === document.body ? { backgroundColor: bgc } : { color: ink }
+
+    const u3 = []
+
+    const recordingGL = new Proxy(mockGL, {
+      get(target, prop) {
+        const value = target[prop]
+
+        if (prop === 'uniform3f')
+          return (...args) => {
+            u3.push(args.slice(1))
+
+            return value(...args)
+          }
+
+        return value
+      },
+    })
+
+    const proto = window.HTMLCanvasElement?.prototype || HTMLCanvasElement.prototype
+
+    proto.getContext = () => recordingGL
+
+    try {
+      const canvas = document.createElement(HTML_TAGS.CANVAS)
+      const host = document.createElement('div')
+
+      document.body.appendChild(canvas)
+      document.body.appendChild(host)
+
+      const handle = mountDocsGlStrip(canvas, host)
+
+      expect(handle).not.toBe(null)
+
+      await flush()
+
+      // Mount-time sample — the first frames carry the stubbed inks.
+      expect(u3).toContainEqual([10 / 255, 20 / 255, 30 / 255])
+      expect(u3).toContainEqual([40 / 255, 50 / 255, 60 / 255])
+
+      // A class flip on <html> re-reads both computed styles — the new
+      // ink lands in the next frame's u_col/u_bg uploads.
+      ink = 'rgb(200, 100, 50)'
+      bgc = 'rgb(5, 15, 25)'
+
+      moCb()
+
+      await flush()
+
+      expect(u3).toContainEqual([200 / 255, 100 / 255, 50 / 255])
+      expect(u3).toContainEqual([5 / 255, 15 / 255, 25 / 255])
+
+      // Unparseable styles keep the previous sample — the `|| color`
+      // and `|| bg` fallback arms inside the observer callback.
+      ink = 'not-a-color'
+      bgc = 'transparent'
+
+      moCb()
+
+      await flush()
+
+      expect(u3[u3.length - 2]).toEqual([200 / 255, 100 / 255, 50 / 255])
+      expect(u3[u3.length - 1]).toEqual([5 / 255, 15 / 255, 25 / 255])
+
+      handle.destroy()
+
+      expect(disconnects).toBe(1)
+
+      canvas.remove()
+      host.remove()
+    } finally {
+      proto.getContext = origGetContext
+      globalThis.MutationObserver = origMO
+      globalThis.getComputedStyle = origGCS
+    }
+  })
+
+  test('mounts without MutationObserver — the observer optional-chains collapse to null', async () => {
+    const origMO = globalThis.MutationObserver
+
+    delete globalThis.MutationObserver
+
+    try {
+      const canvas = document.createElement(HTML_TAGS.CANVAS)
+      const host = document.createElement('div')
+
+      document.body.appendChild(canvas)
+      document.body.appendChild(host)
+
+      const handle = mountDocsGlStrip(canvas, host)
+
+      expect(handle).not.toBe(null)
+
+      await flush()
+
+      // Destroy takes the `themeObserver?.disconnect()` short-circuit.
+      handle.destroy()
+
+      canvas.remove()
+      host.remove()
+    } finally {
+      globalThis.MutationObserver = origMO
+    }
+  })
+
+  test('unparseable computed inks fall back to black uniforms', async () => {
+    const origGCS = globalThis.getComputedStyle
+
+    globalThis.getComputedStyle = () => ({ color: 'transparent', backgroundColor: '' })
+
+    const u3 = []
+
+    const recordingGL = new Proxy(mockGL, {
+      get(target, prop) {
+        const value = target[prop]
+
+        if (prop === 'uniform3f')
+          return (...args) => {
+            u3.push(args.slice(1))
+
+            return value(...args)
+          }
+
+        return value
+      },
+    })
+
+    const proto = window.HTMLCanvasElement?.prototype || HTMLCanvasElement.prototype
+
+    proto.getContext = () => recordingGL
+
+    try {
+      const canvas = document.createElement(HTML_TAGS.CANVAS)
+      const host = document.createElement('div')
+
+      document.body.appendChild(canvas)
+      document.body.appendChild(host)
+
+      const handle = mountDocsGlStrip(canvas, host)
+
+      expect(handle).not.toBe(null)
+
+      await flush()
+
+      // Both `|| [0, 0, 0]` mount-time fallbacks — u_col and u_bg read 0.
+      expect(u3).toContainEqual([0, 0, 0])
+
+      handle.destroy()
+
+      canvas.remove()
+      host.remove()
+    } finally {
+      proto.getContext = origGetContext
+      globalThis.getComputedStyle = origGCS
+    }
+  })
 })

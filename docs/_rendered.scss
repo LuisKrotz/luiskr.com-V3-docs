@@ -612,6 +612,43 @@
       background: var(--bg-secondary);
       border: to-rem($space-3xs) solid color-mix(in srgb, currentColor 20%, transparent);
       border-radius: var(--radius-2xs);
+
+      // Build-time syntax spans (highlight.mjs) reuse the prettify class
+      // names — the same --cov-syn-* inks color both surfaces.
+      .str,
+      .atv {
+        color: var(--cov-syn-str);
+      }
+
+      .kwd,
+      .tag {
+        color: var(--cov-syn-kwd);
+      }
+
+      .com {
+        color: var(--cov-syn-com);
+      }
+
+      .typ,
+      .atn,
+      .dec,
+      .var {
+        color: var(--cov-syn-typ);
+      }
+
+      .lit {
+        color: var(--cov-syn-lit);
+      }
+
+      .pun,
+      .opn,
+      .clo {
+        color: var(--cov-syn-pun);
+      }
+
+      .fun {
+        color: var(--cov-syn-fun);
+      }
     }
   }
 }
