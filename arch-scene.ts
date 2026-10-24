@@ -51,6 +51,19 @@ export interface ArchSceneHandle {
    * @param _path Manifest path of the active location ('' = portal root).
    */
   setActive(_path: string): void
+  /**
+   * Re-fits the renderer + camera to the canvas's current box — called
+   * by the ResizeObserver on column↔dialog moves and any layout shift.
+   */
+  resize(): void
+  /**
+   * Stops/restarts the rAF loop — the host pauses while the map column
+   * is display:none (≤1024) so no GPU frame or CPU wakeup is spent on
+   * an invisible surface. Unpausing re-arms the loop; a resize() right
+   * after re-fits whatever box the canvas re-seated into.
+   * @param _paused True to stop scheduling, false to resume.
+   */
+  setPaused(_paused: boolean): void
 }
 
 /** A flattened manifest node with its ring depth and ring angle. */
@@ -830,13 +843,49 @@ export const mountArchSceneThree = (
 
   resize()
 
+  // The canvas re-seats between the map column and the zoom dialog —
+  // its box changes on every move, so the observer re-fits renderer and
+  // camera without the host needing to know where it lives. The work is
+  // deferred to rAF: a synchronous renderer.setSize inside the RO
+  // notification mutates an observed subtree mid-pass and trips the
+  // "ResizeObserver loop completed with undelivered notifications"
+  // window error. Guarded: environments without ResizeObserver (older
+  // test DOMs) just keep the mount-time size.
+  let resizeRaf = 0
+
+  const ro =
+    typeof ResizeObserver === TYPE_STRINGS.FUNCTION
+      ? new ResizeObserver(() => {
+          // Coalesce bursts (a move generates several entries) into one
+          // deferred fit per frame — the flag doubles as the pending
+          // handle for destroy.
+          if (resizeRaf) return
+
+          resizeRaf = requestAnimationFrame(() => {
+            resizeRaf = 0
+
+            resize()
+          })
+        })
+      : null
+
+  ro?.observe(canvas)
+
   let raf = 0
+
+  /**
+   * Host-driven pause — true while the map column is display:none. The
+   * loop stops scheduling entirely (no rAF wakeup, no GPU frame); the
+   * flag is also re-checked at tick entry so a pause that lands between
+   * schedule and fire still dead-ends the frame.
+   */
+  let paused = false
 
   const t0 = performance.now()
 
   const tick = () => {
     // Context lost mid-flight → stop scheduling; the host owns remount.
-    if (disposed) return
+    if (disposed || paused) return
 
     try {
       controls.update()
@@ -875,10 +924,32 @@ export const mountArchSceneThree = (
       applyActive()
     },
 
+    resize,
+
+    setPaused(next: boolean) {
+      if (next === paused) return
+
+      paused = next
+
+      if (paused) {
+        cancelAnimationFrame(raf)
+      } else if (!disposed) {
+        // Resume on a fresh size read — the canvas may have re-seated
+        // into a different box while the loop was down.
+        resize()
+
+        raf = requestAnimationFrame(tick)
+      }
+    },
+
     destroy() {
       disposed = true
 
+      ro?.disconnect()
+
       cancelAnimationFrame(raf)
+
+      cancelAnimationFrame(resizeRaf)
 
       canvas.removeEventListener(MOUSE_EVENTS.CLICK, onClick)
       canvas.removeEventListener(POINTER_EVENTS.POINTERDOWN, onPointerDown)
@@ -953,6 +1024,9 @@ export const mountArchScene = (
   /** setActive called before the arm resolves — replayed on mount. */
   let pendingPath: string = CHAR_STRINGS.EMPTY
 
+  /** setPaused called before the arm resolves — replayed on mount. */
+  let pendingPaused = false
+
   /** Teardown while the async mount is in flight. */
   let disposed = false
 
@@ -980,6 +1054,7 @@ export const mountArchScene = (
     }
 
     inner.setActive(pendingPath)
+    inner.setPaused(pendingPaused)
   }, DOCS_UNITS.SCENE3D_MOUNT_TIMEOUT)
 
   void mountArchScene3d(canvas, roots, onPick).then((h) => {
@@ -1001,6 +1076,7 @@ export const mountArchScene = (
     }
 
     inner.setActive(pendingPath)
+    inner.setPaused(pendingPaused)
   })
 
   return {
@@ -1008,6 +1084,21 @@ export const mountArchScene = (
       pendingPath = path
 
       inner?.setActive(path)
+    },
+
+    /** Delegates to whichever arm won the mount race (3d or three). */
+    resize() {
+      inner?.resize()
+    },
+
+    /**
+     * Pause/unpause passthrough — a pause that lands before the async
+     * arm resolves is replayed onto `inner` right after mount.
+     */
+    setPaused(next: boolean) {
+      pendingPaused = next
+
+      inner?.setPaused(next)
     },
 
     destroy() {

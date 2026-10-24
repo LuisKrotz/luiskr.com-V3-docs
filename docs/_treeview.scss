@@ -1,10 +1,21 @@
 // ════════════════════════════════════════════════════════════════════════════
-//  docs/_treeview.scss — the treeview panel — collapsible under a toggle on mobile/tablet; folder/file nav list.
+//  docs/_treeview.scss — the treeview panel + combobox chrome: ≤1280px the
+//  tree and breadcrumb merge into a disclosure combobox (button face shows
+//  the current path, the dropdown carries the crumb row + the tree);
+//  ≥1281px the panel is the always-open left column. Rows carry the
+//  animated SVG node icons (folder open/closed + count badge, per-
+//  extension file glyphs).
 //  Imported by docs.scss (manifest) — not compiled standalone.
 // ════════════════════════════════════════════════════════════════════════════
 
 .#{$_B_DOCS} {
-  // ── Treeview — collapsible panel under a toggle on mobile/tablet ─────
+  // ── Combobox host — the dropdown anchors under its button ────────────
+  &-nav {
+    pointer-events: auto;
+    position: relative;
+  }
+
+  // ── Combobox trigger — the collapsed breadcrumb on the button face ───
   &-nav-toggle {
     @extend %RESETBTN;
 
@@ -20,6 +31,9 @@
     padding: to-rem($space-sm) to-rem($space-md);
     margin-bottom: to-rem($space-sm);
     user-select: text;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 
     &::before {
       content: '▸ ';
@@ -34,31 +48,60 @@
       outline-offset: to-rem($space-3xs);
     }
 
-    @include layout-1024() {
+    // ≥1281px the panel is a permanent column — no trigger needed.
+    @media (min-width: #{$vw-1280 + 1px}) {
       display: none;
     }
   }
 
-  &-nav {
-    pointer-events: auto;
+  // ── Dropdown panel — closed by default, glass sheet under the trigger
+  //    ≤1280; a sticky always-on column ≥1281. ──────────────────────────
+  &-nav-panel {
     display: none;
     max-height: 70vh;
     overflow: auto;
-    // Translucent surface + blur — the fixed scene backdrop stays visible
-    // around the edges without fighting the tree text for contrast.
+    // Translucent surface + blur — the GL backdrop stays visible around
+    // the edges without fighting the tree text for contrast.
     background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
     -webkit-backdrop-filter: blur(to-rem($space-xs));
     backdrop-filter: blur(to-rem($space-xs));
     border-radius: var(--radius-2xs);
 
-    .#{$_B_DOCS}-nav-open & {
-      display: block;
+    // The dropdown overlay is a ≤1280 combobox mode only — scoped inside
+    // the media query so its extra specificity can never override the
+    // desktop sticky column when the window crosses the breakpoint with
+    // the panel open.
+    @media (max-width: #{$vw-1280}) {
+      .#{$_B_DOCS}-nav-open & {
+        display: block;
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        z-index: var(--z-modal);
+        box-shadow: var(--shadow-card-hover);
+      }
     }
 
-    @include layout-1024() {
+    @media (min-width: #{$vw-1280 + 1px}) {
       display: block;
       position: sticky;
       top: to-rem($space-xl);
+    }
+  }
+
+  // The crumb row cloned inside the dropdown — the "breadcrumb" half of
+  // the merge; the standalone bar in the content column hides ≤1280.
+  &-nav-crumbs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: to-rem($space-2xs);
+    padding: to-rem($space-2xs) to-rem($space-md);
+    border-bottom: var(--space-hairline) solid var(--border-color);
+
+    @media (min-width: #{$vw-1280 + 1px}) {
+      display: none;
     }
   }
 
@@ -156,6 +199,58 @@
       outline: to-rem($space-3xs) solid var(--focus-ring);
       outline-offset: to-rem($space-3xs);
       border-radius: var(--radius-2xs);
+    }
+  }
+
+  // ── Row icons — animated SVG glyphs (folders open/closed + count
+  //    badge; pages keyed by extension). 1em-square, optically aligned
+  //    to the text midline. ────────────────────────────────────────────
+  &-tree-icon {
+    display: inline-block;
+    width: 1.15em;
+    height: 1.15em;
+    margin-right: to-rem($space-2xs);
+    vertical-align: -0.22em;
+    overflow: visible;
+
+    &-body,
+    &-flap {
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.3;
+      stroke-linejoin: round;
+    }
+
+    // The open flap reads lighter — the swung-open face.
+    &-flap {
+      opacity: 0.7;
+    }
+
+    // Extension tag inside file pages — mono microtype.
+    &-ext {
+      font-family: var(--font-mono);
+      font-size: 5px;
+      fill: currentColor;
+      stroke: none;
+      opacity: 0.8;
+      letter-spacing: 0;
+    }
+  }
+
+  // Folder child-count badge — the inked disc + numeral pinned to the
+  // folder's lower corner; the "amount inside" readout.
+  &-tree-count {
+    circle {
+      fill: var(--bg-primary);
+      stroke: currentColor;
+      stroke-width: 0.9;
+    }
+
+    text {
+      font-family: var(--font-mono);
+      font-size: 6.5px;
+      fill: currentColor;
+      stroke: none;
     }
   }
 }

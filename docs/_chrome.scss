@@ -16,29 +16,27 @@
   padding-top: to-rem($space-4xl);
   box-sizing: border-box;
 
-  // ── GL thread backdrop + persistent 3D architecture scene ────────────
-  // Both are fixed, viewport-sized layers behind the content column —
-  // the scene stays mounted on every docs page so folder navigation is
-  // always available (orbit/pinch on exposed areas, tap-to-pick).
-  &-gl,
-  &-scene {
+  // ── GL thread backdrop — the fixed viewport layer behind the content
+  //    column. The 3D architecture scene is NOT a backdrop anymore: it
+  //    lives inside the map column's stage (see docs/_map.scss). ───────
+  &-gl {
     position: fixed;
     inset: 0;
     width: 100%;
     height: 100%;
     z-index: 0;
     color: var(--text-primary);
-  }
-
-  &-gl {
     pointer-events: none;
   }
 
-  // The scene needs pointer events where the content column leaves it
-  // exposed — OrbitControls owns rotate/pinch, taps pick nodes. Ink is
-  // the project's turquoise accent *contrast* variant: cyan on dark,
-  // deep teal on light — the raw accent is invisible on white.
+  // The persistent scene canvas fills whichever stage hosts it — the
+  // right-hand map column or the centered zoom dialog. Ink is the
+  // project's turquoise accent *contrast* variant: cyan on dark, deep
+  // teal on light — the raw accent is invisible on white.
   &-scene {
+    display: block;
+    width: 100%;
+    height: 100%;
     color: var(--color-accent-contrast);
     cursor: grab;
 
@@ -47,18 +45,10 @@
     }
   }
 
-  // Scene caption — a faint fixed chip in the bottom gutter naming the
-  // backdrop ("architecture map") so first-time viewers know it is the
-  // interactive folder navigator, not decoration. pointer-events: none
-  // keeps the scene draggable under it.
+  // Scene caption — the small chip inside the map head naming the
+  // surface ("architecture map") so first-time viewers know the column
+  // is the interactive folder navigator, not decoration.
   &-scene-hint {
-    position: fixed;
-    right: to-rem($space-md);
-    bottom: to-rem($space-md);
-    // Above the z-index:1 content column — body sits later in DOM order
-    // and would paint over the chip's left half on file pages.
-    z-index: 2;
-    pointer-events: none;
     padding: to-rem($space-3xs) to-rem($space-sm);
     font-size: to-rem($space-md);
     letter-spacing: 0.08em;
@@ -66,7 +56,8 @@
     background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
     -webkit-backdrop-filter: blur(to-rem($space-xs));
     backdrop-filter: blur(to-rem($space-xs));
-    border: 1px solid color-mix(in srgb, var(--color-accent-contrast) 35%, transparent);
+    border: var(--space-hairline) solid
+      color-mix(in srgb, var(--color-accent-contrast) 35%, transparent);
     border-radius: var(--radius-md);
     opacity: 0.75;
   }

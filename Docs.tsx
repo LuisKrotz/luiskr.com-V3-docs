@@ -19,10 +19,11 @@ import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
 import { HTML_TAGS } from '@core/tokens/elements/html.js'
 import { VIEW_TAGS } from '@core/tokens/elements/views.js'
 import { DOCS_IDS } from '@core/tokens/ids/docs.js'
-import { KEYS } from '@core/tokens/primitives.js'
+import { KEYS, MEDIA_QUERIES } from '@core/tokens/primitives.js'
 import { ROUTE_PATHS } from '@core/tokens/routes/paths.js'
 import { DOCS_SELECTORS } from '@core/tokens/selectors/docs.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
+import { TYPE_STRINGS } from '@core/tokens/strings/types.js'
 import { DOCS_LOADER_PCT, DOCS_STRINGS } from '@core/tokens/strings/docs.js'
 import { BaseComponent } from '@core/Component.js'
 import store from '@core/store.js'
@@ -42,7 +43,7 @@ import {
   type DocsNode,
   type DocsFilePayload,
 } from './manifest.js'
-import { GL_EVENTS, MOUSE_EVENTS, PRINT_EVENTS } from '@core/tokens/events/dom.js'
+import { FORM_EVENTS, GL_EVENTS, MOUSE_EVENTS, PRINT_EVENTS } from '@core/tokens/events/dom.js'
 import { renderDocs } from './render.js'
 import { mountDocsGlStrip, type DocsGlHandle } from './gl-strip.js'
 import { mountArchScene, type ArchSceneHandle } from './arch-scene.js'
@@ -74,6 +75,10 @@ export class ViewDocs extends BaseComponent {
   /** Mobile nav-panel open state (the tree collapses under a toggle <1024). */
   navOpen = false
 
+  /** Architecture-map zoom modal — the persistent scene canvas re-seats
+   *  into the centered glass dialog while open. */
+  _mapZoomed = false
+
   /**
    * Path whose tree/grid button regains focus after the next re-render —
    * arrow-key expand/collapse re-creates the DOM, so focus would
@@ -90,6 +95,19 @@ export class ViewDocs extends BaseComponent {
   private _sceneHandle: ArchSceneHandle | null = null
 
   private _sceneCanvas: HTMLCanvasElement | null = null
+
+  /**
+   * Map-column visibility watcher — ≤1024 the aside is display:none and
+   * the scene's rAF loop is paused so hidden canvases cost zero GPU.
+   * The zoom dialog overrides the pause (the modal can open at any
+   * width once the column control exists… but the column only renders
+   * >1024, so the dialog is reachable only there — the listener still
+   * keeps the paused flag honest across resizes).
+   */
+  private _mapMq: MediaQueryList | null = null
+
+  /** Bound change handler for _mapMq — removed in onDestroy. */
+  private _onMapMq = (): void => this._syncScenePaused()
 
   /** Document-level istanbul key-nav disposer while a report is open. */
   private _covNavDispose: (() => void) | null = null
@@ -198,6 +216,17 @@ export class ViewDocs extends BaseComponent {
   /** Mobile "browse" toggle — shows/hides the tree panel on small screens. */
   toggleNav(): void {
     this.navOpen = !this.navOpen
+
+    this._updateDom()
+  }
+
+  /**
+   * Map zoom toggle — opens/closes the centered glass dialog. The
+   * persistent scene canvas re-seats into the dialog's stage on the next
+   * render pass (no context loss, no remount); the column keeps its frame.
+   */
+  toggleMapZoom(): void {
+    this._mapZoomed = !this._mapZoomed
 
     this._updateDom()
   }
@@ -323,7 +352,11 @@ export class ViewDocs extends BaseComponent {
   onViewKey(e: KeyboardEvent): void {
     if (e.key !== KEYS.ESCAPE) return
 
-    if (this.filePayload) {
+    if (this._mapZoomed) {
+      this._mapZoomed = false
+
+      this._updateDom()
+    } else if (this.filePayload) {
       this.closeFile()
     } else if (this.navOpen) {
       this.navOpen = false
@@ -428,14 +461,23 @@ export class ViewDocs extends BaseComponent {
       }
     }
 
-    const sceneCanvas = this.$(`#${DOCS_IDS.SCENE}`) as HTMLCanvasElement | null
+    // The scene canvas is PERSISTENT — created once, re-seated into
+    // whichever stage this render produced (the right-hand map column,
+    // or the zoom dialog while _mapZoomed). Re-parenting keeps the WebGL
+    // context and graph alive across every _updateDom — previously each
+    // render rebuilt the canvas and remounted the whole scene, so a
+    // tree-toggle paid a full GPU graph rebuild.
+    const sceneCanvas = this._sceneEl()
 
-    if (sceneCanvas && sceneCanvas !== this._sceneCanvas) {
+    const stage = this.$(DOCS_SELECTORS.SCENE_STAGE)
+
+    if (stage && sceneCanvas.parentNode !== stage) stage.appendChild(sceneCanvas)
+
+    // Mount exactly once (or again after a context loss cleared the
+    // handle) — the scene-off class marks a dead mount so failed hosts
+    // don't retry the GPU on every render.
+    if (!this._sceneHandle && !sceneCanvas.classList.contains(DOCS_CLASSES.DOCS_SCENE_OFF)) {
       this._mountScene(sceneCanvas)
-
-      // `webglcontextrestored` is the recovery signal — the browser hands
-      // the canvas a fresh context, so a full remount rebuilds the graph.
-      sceneCanvas.addEventListener(GL_EVENTS.WEBGL_CONTEXT_RESTORED, this._onSceneRestored)
 
       // The mount attempt just finished either way (live scene or
       // scene-off fallback) — advance the loader to the scene stage.
@@ -447,6 +489,8 @@ export class ViewDocs extends BaseComponent {
     // Keep the map's active-location marker in sync — both on fresh
     // mounts and on same-canvas navigations (the scene persists).
     this._sceneHandle?.setActive(this.docsPath)
+
+    this._syncScenePaused()
 
     // Arrow-key expand/collapse re-creates the DOM — put focus back on
     // the row that was being driven so ↑/↓ continue from there.
@@ -501,6 +545,32 @@ export class ViewDocs extends BaseComponent {
   }
 
   /**
+   * The persistent scene canvas — created once with its id/class/label
+   * and the `webglcontextrestored` recovery listener, then re-seated by
+   * onUpdated into whichever stage this render produced. Re-parenting a
+   * canvas preserves its WebGL context, so the scene survives renders,
+   * column↔dialog moves and tree toggles without a remount.
+   * @returns The shared scene canvas element.
+   */
+  private _sceneEl(): HTMLCanvasElement {
+    if (!this._sceneCanvas) {
+      const canvas = document.createElement(HTML_TAGS.CANVAS)
+
+      canvas.id = DOCS_IDS.SCENE
+      canvas.className = DOCS_CLASSES.DOCS_SCENE
+      canvas.setAttribute(ARIA_ATTRS.ARIA_LABEL, DOCS_STRINGS.TREE_LABEL)
+
+      // `webglcontextrestored` is the recovery signal — the browser hands
+      // the canvas a fresh context, so a full remount rebuilds the graph.
+      canvas.addEventListener(GL_EVENTS.WEBGL_CONTEXT_RESTORED, this._onSceneRestored)
+
+      this._sceneCanvas = canvas
+    }
+
+    return this._sceneCanvas
+  }
+
+  /**
    * Mounts/remounts the 3D scene on the given canvas. `onLost` marks the
    * canvas with the scene-off class and clears the handle so a later
    * `webglcontextrestored` can rebuild it — the portal stays usable the
@@ -525,6 +595,25 @@ export class ViewDocs extends BaseComponent {
     // No WebGL2 (or a dead context) → hide the canvas rather than a
     // blank box; the grid/tree/crumb navigation carries the portal.
     canvas.classList.toggle(DOCS_CLASSES.DOCS_SCENE_OFF, !this._sceneHandle)
+
+    // Start watching the map-column breakpoint on the first mount —
+    // one listener for the element's lifetime.
+    if (!this._mapMq && typeof matchMedia === TYPE_STRINGS.FUNCTION) {
+      this._mapMq = matchMedia(MEDIA_QUERIES.MIN_WIDTH_1025)
+      this._mapMq.addEventListener(FORM_EVENTS.CHANGE, this._onMapMq)
+    }
+  }
+
+  /**
+   * Pause-state sync — the scene loop halts while the map column is
+   * display:none (≤1024) AND the zoom dialog is closed; at wider widths,
+   * or while the glass dialog is open, the loop runs. Called from
+   * onUpdated, the mq change listener, and toggleMapZoom.
+   */
+  private _syncScenePaused(): void {
+    const columnVisible = this._mapMq ? this._mapMq.matches : true
+
+    this._sceneHandle?.setPaused(!columnVisible && !this._mapZoomed)
   }
 
   /** `webglcontextrestored` handler — rebuilds the scene on the fresh context. */
@@ -549,6 +638,10 @@ export class ViewDocs extends BaseComponent {
     this._covNavDispose = null
 
     this._sceneCanvas?.removeEventListener(GL_EVENTS.WEBGL_CONTEXT_RESTORED, this._onSceneRestored)
+
+    this._mapMq?.removeEventListener(FORM_EVENTS.CHANGE, this._onMapMq)
+
+    this._mapMq = null
 
     window.removeEventListener(PRINT_EVENTS.PREPARE, this._onPrintPrepare)
 
