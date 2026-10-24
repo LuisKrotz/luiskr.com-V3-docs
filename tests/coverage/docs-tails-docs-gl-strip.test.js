@@ -108,6 +108,69 @@ describe('docs GL strip', () => {
     }
   })
 
+  test('disables blending before the first draw — fullscreen overwrite must never accumulate alpha into an opaque veil', async () => {
+    const calls = []
+
+    const recordingGL = new Proxy(mockGL, {
+      get(target, prop) {
+        const value = target[prop]
+
+        if (
+          prop === 'enable' ||
+          prop === 'disable' ||
+          prop === 'blendFunc' ||
+          prop === 'drawArrays'
+        )
+          return (...args) => {
+            calls.push([prop, ...args])
+
+            return value(...args)
+          }
+
+        return value
+      },
+    })
+
+    const proto = window.HTMLCanvasElement?.prototype || HTMLCanvasElement.prototype
+
+    proto.getContext = () => recordingGL
+
+    const canvas = document.createElement(HTML_TAGS.CANVAS)
+    const host = document.createElement('div')
+
+    document.body.appendChild(canvas)
+    document.body.appendChild(host)
+
+    const handle = mountDocsGlStrip(canvas, host)
+
+    expect(handle).not.toBe(null)
+
+    await flush()
+
+    handle.destroy()
+
+    canvas.remove()
+    host.remove()
+
+    const blendDisable = calls.findIndex(
+      ([name, arg]) => name === 'disable' && arg === mockGL.BLEND
+    )
+
+    const firstDraw = calls.findIndex(([name]) => name === 'drawArrays')
+
+    const enablesAfterDisable = calls
+      .slice(blendDisable + 1)
+      .filter(([name, arg]) => name === 'enable' && arg === mockGL.BLEND)
+
+    // createQuadProgram enables BLEND for shared callers; the strip must
+    // turn it back off — blending over a never-cleared fullscreen quad
+    // converges alpha to 1 and paints a solid u_col layer (white in
+    // dark mode) over the whole docs page.
+    expect(blendDisable).toBeGreaterThan(-1)
+    expect(firstDraw).toBeGreaterThan(blendDisable)
+    expect(enablesAfterDisable).toHaveLength(0)
+  })
+
   test('context loss flags the host with the fallback class', async () => {
     const canvas = document.createElement(HTML_TAGS.CANVAS)
     const host = document.createElement('div')
