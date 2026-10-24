@@ -148,6 +148,63 @@ describe('ViewDocs — architecture map zoom + pause wiring', () => {
     expect(view._docsReady).toBe(true)
   })
 
+  test('openMapZoom while already zoomed is an idempotent no-op', async () => {
+    view.openMapZoom()
+    await flush()
+
+    expect(view._mapZoomed).toBe(true)
+
+    // Second open — the early-return arm; state and focus stay put.
+    view.openMapZoom()
+    await flush()
+
+    expect(view._mapZoomed).toBe(true)
+  })
+
+  test('toggleMapZoom while zoomed closes the dialog', async () => {
+    view.openMapZoom()
+    await flush()
+
+    view.toggleMapZoom()
+    await flush()
+
+    expect(view._mapZoomed).toBe(false)
+  })
+
+  test('map close button rebinds when a re-render swaps its canvas node', async () => {
+    view.openMapZoom()
+    await flush()
+
+    const first = view._mapCloseBtn
+
+    expect(first).toBeTruthy()
+
+    // Re-sync against the unchanged canvas — the live widget is kept.
+    view._syncMapCloseBtn()
+
+    expect(view._mapCloseBtn).toBe(first)
+
+    // A re-render while zoomed re-creates the dialog canvas — the stale
+    // widget is destroyed and a fresh one binds to the new node.
+    view._updateDom()
+    await flush()
+
+    expect(view._mapZoomed).toBe(true)
+    expect(view._mapCloseBtn).toBeTruthy()
+  })
+
+  test('the close-bottom caption dismisses the dialog', async () => {
+    const $ = (sel) => view.shadowRoot.querySelector(sel)
+
+    view.openMapZoom()
+    await flush()
+
+    $(`.${DOCS_CLASSES.DOCS_MAP_CLOSE_BOTTOM}`).click()
+    await flush()
+
+    expect(view._mapZoomed).toBe(false)
+  })
+
   test('no matchMedia leaves _mapMq unset and keeps the scene unpaused', () => {
     const orig = globalThis.matchMedia
 

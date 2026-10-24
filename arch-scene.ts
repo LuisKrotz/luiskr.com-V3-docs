@@ -464,11 +464,50 @@ export const mountArchSceneThree = (
     }
   }
 
+  /** Docs path currently highlighted — '' matches the portal-root node. */
+  let activePath: string = CHAR_STRINGS.EMPTY
+
+  /** Manifest path → placed world position + ring depth — buildGraph
+   *  fills it so the map can glide the camera onto the active location. */
+  const nodeTargets = new Map<string, { pos: THREE.Vector3; depth: number }>()
+
+  /** Focus glide state — the orbit target eases toward the active
+   *  node's position and the camera dollies to a depth-scaled distance,
+   *  so picking a route re-centers the map on that location. */
+  const focusNode = new THREE.Vector3(0, 0, 0)
+
+  let focusDist = camDist
+
+  let focusing = false
+
+  /**
+   * Arms the focus glide for a docs location — '' or an unknown path
+   * falls back to the portal root at origin with the full-graph camera
+   * distance; placed nodes aim at their position with a depth-scaled
+   * dolly. Positions land async (worker) — buildGraph re-arms the focus
+   * for whatever path is active when they arrive.
+   */
+  const startFocus = (path: string) => {
+    const hit = path === CHAR_STRINGS.EMPTY ? undefined : nodeTargets.get(path)
+
+    focusNode.set(hit?.pos.x ?? 0, hit?.pos.y ?? 0, hit?.pos.z ?? 0)
+
+    focusDist =
+      !hit || hit.depth === 0
+        ? camDist
+        : Math.min(camDist, DOCS_UNITS.SCENE_FOCUS_MIN + hit.depth * DOCS_UNITS.SCENE_FOCUS_STEP)
+
+    focusing = true
+  }
+
   // First user gesture kills the idle rotation for good; gesture end
   // persists the settled pose. 'start'/'end' are OrbitControls' own
-  // event names (not DOM), tokenized in ORBIT_EVENTS.
+  // event names (not DOM), tokenized in ORBIT_EVENTS. A gesture also
+  // cancels an in-flight focus glide — input wins over the camera move.
   const onControlStart = () => {
     controls.autoRotate = false
+
+    focusing = false
 
     saveCamState()
   }
@@ -513,9 +552,6 @@ export const mountArchSceneThree = (
 
   /** Edge geometry — assigned inside buildGraph, disposed in destroy(). */
   let lineGeo: THREE.BufferGeometry | null = null
-
-  /** Docs path currently highlighted — '' matches the portal-root node. */
-  let activePath: string = CHAR_STRINGS.EMPTY
 
   let disposed = false
 
@@ -595,6 +631,8 @@ export const mountArchSceneThree = (
       if (!depth) pos.set(0, 0, 0)
 
       positions.push(pos)
+
+      nodeTargets.set(node.path, { pos, depth })
 
       if (node.type !== 'file') {
         dirPlaced.push(i)
@@ -702,9 +740,11 @@ export const mountArchSceneThree = (
       )
     )
 
-    // The highlight may have been set while positions were in flight —
-    // re-apply now that the meshes exist.
+    // The highlight/focus may have been set while positions were in
+    // flight — re-apply both now that the meshes + targets exist.
     applyActive()
+
+    startFocus(activePath)
   }
 
   void computePositions(placed).then(buildGraph)
@@ -888,6 +928,59 @@ export const mountArchSceneThree = (
     if (disposed || paused) return
 
     try {
+      // Location focus — the orbit target glides onto the active node's
+      // position and the camera dollies to the depth-scaled framing
+      // distance. Scalar math on pooled fields only: the mock Vector3s
+      // in tests carry no method surface and the frame loop stays
+      // zero-allocation. The goal is re-based through the intro-settle
+      // rotation (rotate about +Y by scene.rotation.y) so the glide
+      // tracks the node even while the spin is still unwinding.
+      if (focusing) {
+        const cy = Math.cos(scene.rotation.y)
+
+        const sy = Math.sin(scene.rotation.y)
+
+        const gx = focusNode.x * cy + focusNode.z * sy
+
+        const gz = focusNode.z * cy - focusNode.x * sy
+
+        const gy = focusNode.y + DOCS_UNITS.SCENE_FOCUS_Y_BIAS
+
+        const ox = camera.position.x - controls.target.x
+
+        const oy = camera.position.y - controls.target.y
+
+        const oz = camera.position.z - controls.target.z
+
+        const len = Math.hypot(ox, oy, oz) || 1
+
+        const k = DOCS_UNITS.SCENE_FOCUS_DAMP
+
+        controls.target.x += (gx - controls.target.x) * k
+
+        controls.target.y += (gy - controls.target.y) * k
+
+        controls.target.z += (gz - controls.target.z) * k
+
+        const nextLen = len + (focusDist - len) * k
+
+        const s = nextLen / len
+
+        camera.position.set(
+          controls.target.x + ox * s,
+          controls.target.y + oy * s,
+          controls.target.z + oz * s
+        )
+
+        if (
+          Math.hypot(gx - controls.target.x, gy - controls.target.y, gz - controls.target.z) <
+            DOCS_UNITS.SCENE_FOCUS_EPS &&
+          Math.abs(focusDist - nextLen) < DOCS_UNITS.SCENE_FOCUS_EPS
+        ) {
+          focusing = false
+        }
+      }
+
       controls.update()
 
       // Intro settle — easeOutCubic from SCENE_INTRO_TURN to 0; after the
@@ -922,6 +1015,8 @@ export const mountArchSceneThree = (
       activePath = path
 
       applyActive()
+
+      startFocus(path)
     },
 
     resize,

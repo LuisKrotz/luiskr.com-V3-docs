@@ -255,7 +255,7 @@ jest.unstable_mockModule('three', () => {
   }
 })
 
-const { mountArchScene, placeRoots } = await import('@docs/arch-scene.js')
+const { mountArchScene, placeRoots, computePositions } = await import('@docs/arch-scene.js')
 const { DOCS_STRINGS, DOCS_UNITS } = await import('@core/tokens/strings/docs.js')
 const { ViewDocs } = await import('@docs/Docs.js')
 const { CACHE_STORAGE_KEYS } = await import('@core/tokens/data/storage.js')
@@ -978,6 +978,124 @@ describe('docs architecture scene', () => {
 
     handle.destroy()
     spy.mockRestore()
+    canvas.remove()
+  })
+
+  test('setActive glides the orbit target onto the active node and disengages', async () => {
+    const origRaf = globalThis.requestAnimationFrame
+    let tickFn = null
+
+    globalThis.requestAnimationFrame = (fn) => {
+      tickFn = fn
+
+      return 1
+    }
+
+    // A saved pose skips the intro turn — the graph never rotates, so
+    // the focus goal is the raw node position (deterministic assert).
+    sessionStorage.setItem(
+      CACHE_STORAGE_KEYS.DOCS_SCENE_STATE,
+      JSON.stringify({ p: [0, 40, 50], t: [0, 0, 0], off: false })
+    )
+
+    const canvas = document.createElement(HTML_TAGS.CANVAS)
+
+    document.body.appendChild(canvas)
+
+    const handle = mountArchScene(canvas, ROOTS, jest.fn())
+
+    await flush()
+
+    try {
+      handle.setActive('docs/architecture')
+
+      // SCENE_FOCUS_DAMP eases ~7% per tick — a few hundred same-stamp
+      // steps land inside SCENE_FOCUS_EPS and flip the glide off.
+      const now = performance.now()
+
+      for (let i = 0; i < 500; i++) tickFn(now)
+
+      const placed = placeRoots(ROOTS)
+      const idx = placed.findIndex((p) => p.node.path === 'docs/architecture')
+      const xyz = await computePositions(placed)
+
+      const gx = xyz[idx * 3]
+      const gy = xyz[idx * 3 + 1] + DOCS_UNITS.SCENE_FOCUS_Y_BIAS
+      const gz = xyz[idx * 3 + 2]
+
+      const target = OrbitControls.lastInstance.target
+
+      expect(Math.hypot(target.x - gx, target.y - gy, target.z - gz)).toBeLessThan(0.5)
+
+      // Settled — the next tick takes the no-focus arm and leaves the
+      // target untouched.
+      const [tx, ty, tz] = [target.x, target.y, target.z]
+
+      tickFn(now)
+
+      expect(target.x).toBe(tx)
+      expect(target.y).toBe(ty)
+      expect(target.z).toBe(tz)
+
+      // Back to the portal root — '' aims the rig at the origin at the
+      // full-graph distance.
+      handle.setActive('')
+
+      for (let i = 0; i < 500; i++) tickFn(now)
+
+      expect(Math.hypot(target.x, target.y - DOCS_UNITS.SCENE_FOCUS_Y_BIAS, target.z)).toBeLessThan(
+        0.5
+      )
+    } finally {
+      globalThis.requestAnimationFrame = origRaf
+    }
+
+    handle.destroy()
+    canvas.remove()
+  })
+
+  test('a camera parked exactly on the target keeps the glide finite', async () => {
+    const origRaf = globalThis.requestAnimationFrame
+    let tickFn = null
+
+    globalThis.requestAnimationFrame = (fn) => {
+      tickFn = fn
+
+      return 1
+    }
+
+    // p === t → the camera/target offset is the zero vector — the
+    // `|| 1` length guard keeps the dolly scale finite.
+    sessionStorage.setItem(
+      CACHE_STORAGE_KEYS.DOCS_SCENE_STATE,
+      JSON.stringify({ p: [0, 0, 0], t: [0, 0, 0], off: false })
+    )
+
+    const canvas = document.createElement(HTML_TAGS.CANVAS)
+
+    document.body.appendChild(canvas)
+
+    const handle = mountArchScene(canvas, ROOTS, jest.fn())
+
+    await flush()
+
+    try {
+      handle.setActive('docs/architecture')
+
+      const now = performance.now()
+
+      for (let i = 0; i < 10; i++) tickFn(now)
+
+      const target = OrbitControls.lastInstance.target
+
+      expect(Number.isFinite(target.x)).toBe(true)
+      expect(Number.isFinite(target.y)).toBe(true)
+      expect(Number.isFinite(target.z)).toBe(true)
+    } finally {
+      globalThis.requestAnimationFrame = origRaf
+    }
+
+    handle.destroy()
     canvas.remove()
   })
 

@@ -24,7 +24,6 @@ import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
 import { DOCS_UNITS } from '@core/tokens/strings/docs.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 import { h } from '@core/jsx.js'
-import { hashName } from './folder-svg.js'
 import type { DocsNode } from './manifest.js'
 
 /** SVG viewport box shared by every row icon (unit-agnostic square). */
@@ -34,6 +33,21 @@ const VIEW_BOX = '0 0 24 24'
 const L = DOCS_CLASSES.DOCS_ICON_LINE
 const F = DOCS_CLASSES.DOCS_ICON_FILL
 const O = DOCS_CLASSES.DOCS_ICON_ON
+
+/**
+ * Deterministic 32-bit-ish name hash — walks the string with a rolling
+ * multiply-add; the modulus lives in DOCS_UNITS so the spread stays
+ * tuned. Seeds every per-node art variance (paper fan, SMIL phase).
+ */
+export const hashName = (name: string): number => {
+  let h = 0
+
+  for (let i = 0; i < name.length; i++) {
+    h = (h * 33 + name.charCodeAt(i)) % DOCS_UNITS.FOLDER_HASH_MOD
+  }
+
+  return h
+}
 
 /** Seconds-per-revolution etc. — art pacing, not layout. */
 const sway = (dur: number, a: string, b: string): SVGElement =>
@@ -96,10 +110,30 @@ const paperSheet = (seed: number, i: number, open: boolean, top: boolean): SVGEl
 }
 
 /**
+ * macOS/Windows-style folder silhouette — the raised left tab and the
+ * rounded body are what make the glyph read as a folder at row size.
+ * Closed folders get a full body with the front-face seam; open folders
+ * truncate the back plate at the mouth and swing the front flap
+ * forward — a trapezoid whose bottom edge is wider than the top, the
+ * perspective cue of a cover leaning toward the viewer.
+ */
+const FOLDER_BODY_CLOSED =
+  'M3.4 19 L3.4 8.6 Q3.4 7.4 4.6 7.4 L9.2 7.4 L11.4 9.4 L19.4 9.4 Q20.6 9.4 20.6 10.6 L20.6 17.8 Q20.6 19 19.4 19 Z'
+
+const FOLDER_BODY_OPEN =
+  'M3.4 12.6 L3.4 8.6 Q3.4 7.4 4.6 7.4 L9.2 7.4 L11.4 9.4 L19.4 9.4 Q20.6 9.4 20.6 10.6 L20.6 12.6 Z'
+
+const FOLDER_FACE_CLOSED = 'M3.4 19 L3.4 12.4 L20.6 12.4 L20.6 17.8 Q20.6 19 19.4 19 Z'
+
+const FOLDER_FLAP_OPEN = 'M5 12.7 L19.6 12.7 L22.4 19.4 L1.6 19.4 Z'
+
+/**
  * Directory glyph — back plate + tab, a stack of paper sheets whose
- * visible count equals min(children, TREE_SHEET_CAP), and a sheared
- * front flap while open. The number IS the artwork: 0 sheets = empty,
- * a full stack = a heavy folder — no numeral badge.
+ * visible count equals min(children, TREE_SHEET_CAP), the front face
+ * (closed) or a swung-forward flap (open). The flap plays a one-shot
+ * swing on mount so the open transition reads as motion. The sheet
+ * count IS the artwork: 0 sheets = empty, a full stack = a heavy
+ * folder — no numeral badge.
  * @param node The directory manifest node.
  * @param open Whether the branch is expanded in the treeview.
  * @returns The SVG subtree.
@@ -126,25 +160,28 @@ const folderIcon = (node: DocsNode, open: boolean): SVGElement => {
       preserveAspectRatio="xMidYMid meet"
     >
       {papers}
-      {/* Back plate + tab — open state ends the plate at the mouth so
-          the sheared flap reads as the folder swung open. */}
+      <path
+        className={`${DOCS_CLASSES.DOCS_TREE_ICON}-body`}
+        d={open ? FOLDER_BODY_OPEN : FOLDER_BODY_CLOSED}
+      />
       {open ? (
-        <path
-          className={`${DOCS_CLASSES.DOCS_TREE_ICON}-body`}
-          d="M3 7 Q3 6 4 6 L9.4 6 L11.4 8 L20 8 Q21 8 21 9 L21 11 L3 11 Z"
-        />
+        <path className={`${DOCS_CLASSES.DOCS_TREE_ICON}-flap`} d={FOLDER_FLAP_OPEN}>
+          {/* One-shot swing — the flap drops forward from the mouth with
+              a small overshoot so opening a folder reads as motion even
+              though the open state re-renders the glyph. */}
+          <animateTransform
+            attributeName="transform"
+            type="rotate"
+            values="-72 12 12.7;6 12 12.7;0 12 12.7"
+            keyTimes="0;0.72;1"
+            dur="0.45s"
+            repeatCount="1"
+            fill="freeze"
+          />
+        </path>
       ) : (
-        <path
-          className={`${DOCS_CLASSES.DOCS_TREE_ICON}-body`}
-          d="M3 7 Q3 6 4 6 L9.4 6 L11.4 8 L20 8 Q21 8 21 9 L21 19 Q21 20 20 20 L4 20 Q3 20 3 19 Z"
-        />
+        <path className={`${DOCS_CLASSES.DOCS_TREE_ICON}-face`} d={FOLDER_FACE_CLOSED} />
       )}
-      {open ? (
-        <path
-          className={`${DOCS_CLASSES.DOCS_TREE_ICON}-flap`}
-          d="M3 20 L5.5 12.2 L22.5 12.2 L20 20 Z"
-        />
-      ) : null}
     </svg>
   ) as SVGElement
 }

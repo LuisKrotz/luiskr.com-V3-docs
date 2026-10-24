@@ -534,8 +534,12 @@ export class ViewDocs extends BaseComponent {
     }
 
     // Keep the map's active-location marker in sync — both on fresh
-    // mounts and on same-canvas navigations (the scene persists).
-    this._sceneHandle?.setActive(this.docsPath)
+    // mounts and on same-canvas navigations (the scene persists). The
+    // resolved node path carries the root-bucket prefix the scene's
+    // target table keys on; bare URLs ('architecture/x.md') resolve to
+    // 'docs/architecture/x.md' before the lookup, and unresolvable
+    // paths fall back to the portal root.
+    this._sceneHandle?.setActive(this.node?.path || CHAR_STRINGS.EMPTY)
 
     this._syncMapCloseBtn()
 
