@@ -51,7 +51,9 @@ const countMatches = (re: RegExp, source: string): number => {
 
 /**
  * Scores a diagram's predicted render+layout cost through the ONNX
- * `diagram-cost` model (WebNN → WebGPU → wasm EP). When the predicted
+ * `diagram-cost` model (wasm EP — the slug is in ML_WASM_EP_MODELS so
+ * the session never issues GPU pipeline-compile IPCs while the docs
+ * scene compiles its own shaders). When the predicted
  * cost clears DIAGRAM_DEFER_MS the caller yields one task turn before
  * rendering so a large graph can't long-task the docs view between
  * blocks. A null score (no runtime/model) means render immediately —

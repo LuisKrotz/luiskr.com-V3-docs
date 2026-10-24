@@ -3,9 +3,15 @@
 //  nav surface: orbit/pinch + tap-to-pick on the persistent scene canvas),
 //  its zoom trigger, and the centered glass dialog the canvas re-seats
 //  into while zoomed. Hidden ≤1024px — the tree/combobox carries
-//  navigation on small screens.
+//  navigation on small screens. The dialog chrome mirrors the project's
+//  expand-modal pattern: pref-close circular canvas button + CSS-X
+//  fallback, fullscreen close-area catcher, corner-bracket close-bottom.
 //  Imported by docs.scss (manifest) — not compiled standalone.
 // ════════════════════════════════════════════════════════════════════════════
+
+// Shared block prefixes — same local-declaration convention as modal.scss.
+$_B_PREF_CLOSE: 'pref-close';
+$_B_EXPAND_CLOSE_FALLBACK: 'expand-modal-close-bar-fallback';
 
 .#{$_B_DOCS} {
   // ── Map column — sticky pane the same height as the viewport, so the
@@ -50,9 +56,8 @@
     overflow: hidden;
   }
 
-  // Zoom + close controls — the project's hairline-corner square button.
-  &-map-zoom,
-  &-map-close {
+  // Zoom trigger — the project's hairline-corner square button.
+  &-map-zoom {
     @extend %RESETBTN;
 
     display: inline-flex;
@@ -79,6 +84,92 @@
     }
   }
 
+  // Circular close button — the pref-close contract, self-contained
+  // (docs.scss doesn't adopt preferences.scss, so geometry + fallback
+  // are re-authored here exactly as _expand-modal.scss does).
+  .#{$_B_PREF_CLOSE}-btn {
+    @extend %RESETBTN;
+
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    flex-shrink: 0;
+    width: to-rem($space-2xl);
+    height: to-rem($space-2xl);
+    border-radius: var(--radius-round);
+    color: inherit;
+    background: color-mix(in srgb, currentColor 10%, transparent);
+    cursor: pointer;
+    transition:
+      background 0.2s ease,
+      transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+
+    .#{$_B_PREF_CLOSE}-canvas {
+      position: absolute;
+      inset: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+      border-radius: var(--radius-round);
+      pointer-events: none;
+
+      &.is-fallback {
+        display: none;
+      }
+    }
+
+    // The CSS X stays authoritative until the widget's first frame —
+    // adjacent-sibling switch, no :has() (old-browser fallback).
+    .#{$_B_EXPAND_CLOSE_FALLBACK} {
+      position: absolute;
+      inset: 0;
+      display: block;
+      pointer-events: none;
+
+      &::before,
+      &::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: to-rem($space-lg);
+        height: to-rem($space-2xs);
+        border-radius: var(--radius-round);
+        background: currentColor;
+        transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      &::before {
+        transform: translate(-50%, -50%) rotate(45deg);
+      }
+
+      &::after {
+        transform: translate(-50%, -50%) rotate(-45deg);
+      }
+    }
+
+    .#{$_B_PREF_CLOSE}-canvas:not(.is-fallback) + .#{$_B_EXPAND_CLOSE_FALLBACK} {
+      display: none;
+    }
+
+    &:hover,
+    &:focus-visible {
+      background: color-mix(in srgb, currentColor 18%, transparent);
+      outline: to-rem($space-3xs) solid var(--focus-ring);
+      outline-offset: to-rem($space-3xs);
+
+      .#{$_B_EXPAND_CLOSE_FALLBACK}::before {
+        transform: translate(-50%, -50%) rotate(135deg);
+      }
+
+      .#{$_B_EXPAND_CLOSE_FALLBACK}::after {
+        transform: translate(-50%, -50%) rotate(45deg);
+      }
+    }
+  }
+
   // ── Zoom modal — the glass overlay + centered dialog. The overlay's
   //    translucency + blur is the requested glass transparency; the
   //    dialog keeps a hairline frame and hosts the enlarged scene. ─────
@@ -97,6 +188,8 @@
   }
 
   &-map-dialog {
+    // Positioned so it stacks above the fixed close-area click-catcher.
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: to-rem($space-2xs);
@@ -111,5 +204,69 @@
     border: var(--space-hairline) solid var(--border-color);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-card-hover);
+  }
+
+  // Fullscreen click-catcher between the glass backdrop and the dialog —
+  // the expand-modal close-area pattern (tap-outside dismisses; dialog
+  // clicks never reach it).
+  &-map-close-area {
+    position: fixed;
+    inset: 0;
+    cursor: pointer;
+  }
+
+  // Labelled close under the dialog — the expand-modal close-bottom
+  // pattern: uppercase caption with growing corner brackets on hover.
+  &-map-close-bottom {
+    @extend %RESETBTN;
+
+    align-self: center;
+    color: var(--text-muted);
+    font-weight: 700;
+    font-size: to-rem($space-md);
+    text-transform: uppercase;
+    letter-spacing: to-rem(2);
+    cursor: pointer;
+    position: relative;
+    padding: to-rem($space-xs) to-rem($space-lg);
+    transition: color 0.2s ease;
+
+    &::before,
+    &::after {
+      content: '';
+      position: absolute;
+      width: to-rem($space-md);
+      height: to-rem($space-md);
+      transition:
+        width 0.2s ease,
+        height 0.2s ease;
+    }
+
+    &::before {
+      top: 0;
+      left: 0;
+      border-top: var(--space-hairline) solid currentColor;
+      border-left: var(--space-hairline) solid currentColor;
+    }
+
+    &::after {
+      bottom: 0;
+      right: 0;
+      border-bottom: var(--space-hairline) solid currentColor;
+      border-right: var(--space-hairline) solid currentColor;
+    }
+
+    &:hover,
+    &:focus-visible {
+      color: var(--text-primary);
+      outline: to-rem($space-3xs) solid var(--focus-ring);
+      outline-offset: to-rem($space-3xs);
+
+      &::before,
+      &::after {
+        width: calc(100% - #{to-rem($space-xs)});
+        height: calc(100% - #{to-rem($space-xs)});
+      }
+    }
   }
 }

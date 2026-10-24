@@ -14,6 +14,7 @@ import { VIEW_TAGS } from '@core/tokens/elements/views.js'
 import { ROUTE_PATHS } from '@core/tokens/routes/paths.js'
 import { ROUTE_NAMES } from '@core/tokens/routes/names.js'
 import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
+import { PREF_CLASSES } from '@core/tokens/classes/preferences.js'
 import { DOCS_IDS } from '@core/tokens/ids/docs.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 import { KEYS } from '@core/tokens/primitives.js'
@@ -81,19 +82,19 @@ describe('ViewDocs — architecture map zoom + pause wiring', () => {
   test('close button and backdrop click both dismiss; inner clicks keep it open', async () => {
     const $ = (sel) => view.shadowRoot.querySelector(sel)
 
-    // Close button arm.
+    // Close button arm — the dialog's PREF_CLOSE_BTN (project pattern).
     view.toggleMapZoom()
     await flush()
-    $(`.${DOCS_CLASSES.DOCS_MAP_CLOSE}`).click()
+    $(`.${PREF_CLASSES.PREF_CLOSE_BTN}`).click()
     await flush()
 
     expect(view._mapZoomed).toBe(false)
     expect($(`#${DOCS_IDS.MAP_MODAL}`)).toBeFalsy()
 
-    // Backdrop self-click arm (target === currentTarget dismisses).
+    // Backdrop arm — the fullscreen close-area catcher dismisses.
     view.toggleMapZoom()
     await flush()
-    $(`.${DOCS_CLASSES.DOCS_MAP_MODAL}`).click()
+    $(`.${DOCS_CLASSES.DOCS_MAP_CLOSE_AREA}`).click()
     await flush()
 
     expect(view._mapZoomed).toBe(false)
@@ -111,7 +112,10 @@ describe('ViewDocs — architecture map zoom + pause wiring', () => {
     view.toggleMapZoom()
     await flush()
 
-    view.onViewKey({ key: KEYS.ESCAPE })
+    // A real keydown on the view root exercises the JSX handler wrapper.
+    view.shadowRoot
+      .querySelector(`.${DOCS_CLASSES.DOCS}`)
+      .dispatchEvent(new KeyboardEvent('keydown', { key: KEYS.ESCAPE, bubbles: true }))
     await flush()
 
     expect(view._mapZoomed).toBe(false)
