@@ -49,6 +49,8 @@ interface ArmNode {
   z: number
   /** Sphere radius for hit tests (pulse widened). */
   radius: number
+  /** Ring depth — the focus-glide dolly distance input. */
+  depth: number
   /** Manifest path — onPick payload + highlight key. */
   path: string
   /** Resting opacity (dir/file token). */
@@ -320,6 +322,8 @@ export const mountArchScene3d = async (
   const onControlStart = () => {
     ctl.autoRotate = false
 
+    focus.on = false
+
     saveCamState()
   }
 
@@ -342,6 +346,43 @@ export const mountArchScene3d = async (
   let activePath: string = CHAR_STRINGS.EMPTY
 
   let disposed = false
+
+  /**
+   * Location-focus glide — setActive retargets; the tick eases the orbit
+   * rig's target + distance toward the goal (the rig's setTarget/setPose
+   * snap, so per-frame lerped writes ARE the animation). '' or an
+   * unknown path falls back to the origin at the full-graph distance.
+   */
+  const focus: { x: number; y: number; z: number; dist: number; on: boolean } = {
+    x: 0,
+    y: DOCS_UNITS.SCENE_FOCUS_Y_BIAS,
+    z: 0,
+    dist: dist0,
+    on: false,
+  }
+
+  /**
+   * Arms the focus glide for a docs location — placed nodes aim at their
+   * world position with a depth-scaled dolly; the portal root keeps the
+   * full-graph distance. Re-armed at the end of buildGraph so a location
+   * set before positions landed still centers once they arrive.
+   */
+  const startFocus = (path: string) => {
+    const hit = path === CHAR_STRINGS.EMPTY ? undefined : pickables.find((p) => p.path === path)
+
+    focus.x = hit?.x ?? 0
+
+    focus.y = (hit?.y ?? 0) + DOCS_UNITS.SCENE_FOCUS_Y_BIAS
+
+    focus.z = hit?.z ?? 0
+
+    focus.dist =
+      !hit || hit.depth === 0
+        ? dist0
+        : Math.min(dist0, DOCS_UNITS.SCENE_FOCUS_MIN + hit.depth * DOCS_UNITS.SCENE_FOCUS_STEP)
+
+    focus.on = true
+  }
 
   /**
    * Paints the active-location highlight onto live nodes — same rules
@@ -409,6 +450,7 @@ export const mountArchScene3d = async (
         y,
         z,
         radius: isDir ? DOCS_UNITS.SCENE_DIR_RADIUS : DOCS_UNITS.SCENE_FILE_RADIUS,
+        depth: placed[i].depth,
         path: node.path,
         baseOpacity: opacity,
         activeScale: 1,
@@ -463,6 +505,8 @@ export const mountArchScene3d = async (
     if (disposed) return
 
     applyActive()
+
+    startFocus(activePath)
   }
 
   void computePositions(placed).then(buildGraph)
@@ -538,7 +582,12 @@ export const mountArchScene3d = async (
   canvas.addEventListener(POINTER_EVENTS.POINTERDOWN, onPointerDown, { passive: true })
 
   // Intro settle — identical easeOutCubic window to the three arm.
+  // rootYaw tracks the live euler so focus goals stay glued to their
+  // node while the settle spin is still unwinding.
   const introFrom = saved ? 0 : DOCS_UNITS.SCENE_INTRO_TURN
+
+  let rootYaw = 0
+
   const t0 = performance.now()
 
   let raf = 0
@@ -563,6 +612,42 @@ export const mountArchScene3d = async (
     t += dt
 
     try {
+      // Location focus — retarget the rig toward the active node (goal
+      // re-based through the intro rotation) and dolly to the framing
+      // distance. setTarget/setPose snap, so lerped per-frame writes
+      // are the glide itself.
+      if (focus.on) {
+        const k = DOCS_UNITS.SCENE_FOCUS_DAMP
+
+        const cy = Math.cos(rootYaw)
+
+        const sy = Math.sin(rootYaw)
+
+        const gx = focus.x * cy + focus.z * sy
+
+        const gz = focus.z * cy - focus.x * sy
+
+        const ntx = ctl.tx + (gx - ctl.tx) * k
+
+        const nty = ctl.ty + (focus.y - ctl.ty) * k
+
+        const ntz = ctl.tz + (gz - ctl.tz) * k
+
+        ctl.setTarget(ntx, nty, ntz)
+
+        const nd = ctl.distance + (focus.dist - ctl.distance) * k
+
+        ctl.setPose(nd, ctl.yaw, ctl.pitch)
+
+        if (
+          Math.abs(gx - ntx) + Math.abs(focus.y - nty) + Math.abs(gz - ntz) <
+            DOCS_UNITS.SCENE_FOCUS_EPS &&
+          Math.abs(focus.dist - nd) < DOCS_UNITS.SCENE_FOCUS_EPS
+        ) {
+          focus.on = false
+        }
+      }
+
       if (ctl.update(dt)) {
         surface.set_orbit(ctl.tx, ctl.ty, ctl.tz, ctl.distance, ctl.yaw, ctl.pitch)
       }
@@ -570,7 +655,9 @@ export const mountArchScene3d = async (
       if (introFrom) {
         const k = Math.min(1, (now - t0) / DOCS_UNITS.SCENE_INTRO_MS)
 
-        surface.set_euler(graphRoot, 0, introFrom * Math.pow(1 - k, 3), 0)
+        rootYaw = introFrom * Math.pow(1 - k, 3)
+
+        surface.set_euler(graphRoot, 0, rootYaw, 0)
       }
 
       // Node pulse — the same per-node sine the three arm writes into
@@ -620,6 +707,8 @@ export const mountArchScene3d = async (
       activePath = path
 
       applyActive()
+
+      startFocus(path)
     },
 
     // The mount facade already owns a ResizeObserver feeding device-px

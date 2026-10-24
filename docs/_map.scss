@@ -14,14 +14,18 @@ $_B_PREF_CLOSE: 'pref-close';
 $_B_EXPAND_CLOSE_FALLBACK: 'expand-modal-close-bar-fallback';
 
 .#{$_B_DOCS} {
-  // ── Map column — sticky pane the same height as the viewport, so the
-  //    radial tree stays in view while the content column scrolls. ─────
+  // ── Map column — sticky pane whose top edge lines up with the tree
+  //    column (same sticky offset) and whose height matches the tree
+  //    panel's 70vh cap, so both navigation surfaces share one start
+  //    line. The scene's orbit target carries a downward bias so the
+  //    radial graph renders toward the TOP of the canvas instead of
+  //    dead-center. ────────────────────────────────────────────────────
   &-map {
     pointer-events: auto;
     display: none;
     position: sticky;
     top: to-rem($space-xl);
-    height: calc(100dvh - #{to-rem($space-3xl)});
+    height: 70vh;
     flex-direction: column;
     gap: to-rem($space-2xs);
     box-sizing: border-box;

@@ -47,7 +47,7 @@ jest.unstable_mockModule('@core/utils/gpu/orbit-controller.js', () => ({
 
 const { mountArchScene3d, parseInk, poseFromPos, buildEdges } =
   await import('@docs/arch-scene-3d.js')
-const { mountArchScene } = await import('@docs/arch-scene.js')
+const { mountArchScene, placeRoots, computePositions } = await import('@docs/arch-scene.js')
 
 /* ── Fixture tree ─────────────────────────────────────────────── */
 
@@ -373,6 +373,80 @@ describe('arch-scene-3d mount', () => {
     expect(sessionStorage.getItem(CACHE_STORAGE_KEYS.DOCS_SCENE_STATE)).not.toBeNull()
 
     mockCtl.fire(ORBIT_EVENTS.END)
+
+    handle.destroy()
+  })
+
+  test('setActive glides the rig target onto the active node and disengages', async () => {
+    const origRaf = globalThis.requestAnimationFrame
+    let tickFn = null
+
+    globalThis.requestAnimationFrame = (fn) => {
+      tickFn = fn
+
+      return 1
+    }
+
+    // Saved pose → introFrom stays 0 → rootYaw is fixed at 0, so the
+    // focus goal equals the node's raw world position.
+    sessionStorage.setItem(
+      CACHE_STORAGE_KEYS.DOCS_SCENE_STATE,
+      JSON.stringify({ p: [0, 40, 50], t: [0, 0, 0], off: true })
+    )
+
+    const handle = await mountArchScene3d(canvas, ROOTS, jest.fn())
+
+    await flush()
+    await flush()
+
+    try {
+      handle.setActive('docs/architecture')
+
+      // ~7% damp per tick — a few hundred same-stamp steps converge the
+      // rig inside SCENE_FOCUS_EPS and flip the glide off.
+      const now = performance.now()
+
+      for (let i = 0; i < 500; i++) tickFn(now)
+
+      const placed = placeRoots(ROOTS)
+      const idx = placed.findIndex((p) => p.node.path === 'docs/architecture')
+      const xyz = await computePositions(placed)
+
+      expect(Math.abs(mockCtl.tx - xyz[idx * 3])).toBeLessThan(0.5)
+      expect(
+        Math.abs(mockCtl.ty - (xyz[idx * 3 + 1] + DOCS_UNITS.SCENE_FOCUS_Y_BIAS))
+      ).toBeLessThan(0.5)
+      expect(Math.abs(mockCtl.tz - xyz[idx * 3 + 2])).toBeLessThan(0.5)
+      expect(
+        Math.abs(
+          mockCtl.distance -
+            (DOCS_UNITS.SCENE_FOCUS_MIN + placed[idx].depth * DOCS_UNITS.SCENE_FOCUS_STEP)
+        )
+      ).toBeLessThan(0.5)
+
+      // Disengaged — a later tick takes the focus.on-false arm and
+      // leaves every rig field untouched.
+      const [tx, ty, tz, d] = [mockCtl.tx, mockCtl.ty, mockCtl.tz, mockCtl.distance]
+
+      tickFn(now)
+
+      expect(mockCtl.tx).toBe(tx)
+      expect(mockCtl.ty).toBe(ty)
+      expect(mockCtl.tz).toBe(tz)
+      expect(mockCtl.distance).toBe(d)
+
+      // Portal root — '' re-arms the glide toward the origin at the
+      // full-graph distance.
+      handle.setActive('')
+
+      for (let i = 0; i < 500; i++) tickFn(now)
+
+      expect(Math.abs(mockCtl.tx)).toBeLessThan(0.5)
+      expect(Math.abs(mockCtl.ty - DOCS_UNITS.SCENE_FOCUS_Y_BIAS)).toBeLessThan(0.5)
+      expect(Math.abs(mockCtl.tz)).toBeLessThan(0.5)
+    } finally {
+      globalThis.requestAnimationFrame = origRaf
+    }
 
     handle.destroy()
   })

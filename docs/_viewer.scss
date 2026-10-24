@@ -22,16 +22,33 @@
     margin-bottom: to-rem($space-sm);
   }
 
+  // Back trigger — the project's hairline-corner square glyph button,
+  // same shape as the map zoom control.
   &-viewer-back {
-    background: none;
+    @extend %RESETBTN;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: to-rem($space-2xl);
+    height: to-rem($space-2xl);
+    flex: 0 0 auto;
+    font-family: var(--font-mono);
+    font-size: to-rem($space-lg);
+    line-height: 1;
+    color: inherit;
+    background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
     border: to-rem($space-3xs) solid currentColor;
     border-radius: var(--radius-2xs);
-    color: inherit;
-    font: inherit;
-    font-size: to-rem($space-lg);
-    padding: to-rem($space-2xs) to-rem($space-md);
     cursor: pointer;
-    min-height: to-rem($space-2xl);
+    transition: opacity 0.2s ease;
+
+    &:hover,
+    &:focus-visible {
+      opacity: 0.7;
+      outline: to-rem($space-3xs) solid var(--focus-ring);
+      outline-offset: to-rem($space-3xs);
+    }
   }
 
   &-viewer-path {

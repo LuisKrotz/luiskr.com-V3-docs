@@ -25,7 +25,7 @@ import { DOCS_STRINGS, DOCS_UNITS } from '@core/tokens/strings/docs.js'
 import { TYPE_STRINGS } from '@core/tokens/strings/types.js'
 import { h } from '@core/jsx.js'
 import { isPlainClick } from '@core/utils/dom.js'
-import { folderSvg } from './folder-svg.js'
+import { ARROW_GLYPHS } from '@core/tokens/theme/arrows.js'
 import { treeIcon } from './tree-icon.js'
 import { crumbsForPath, getDocsManifest } from './manifest.js'
 import type { ViewDocs } from './Docs.js'
@@ -94,6 +94,20 @@ const treeNodes = (view: ViewDocs, nodes: DocsNode[]): HTMLElement[] =>
             view.pickTreeNode(node)
           }}
         >
+          {/* Disclosure chevron — dirs carry the arrow (down = closed,
+              up = expanded, rotated by CSS); files get an empty spacer
+              so the icon column stays aligned across mixed rows. */}
+          {isDir ? (
+            <svg
+              className={DOCS_CLASSES.DOCS_TREE_CHEVRON}
+              viewBox="0 0 12 12"
+              aria-hidden={ATTR_VALUES.TRUE}
+            >
+              <path d="M3 4.4 L6 7.6 L9 4.4" />
+            </svg>
+          ) : (
+            <i className={DOCS_CLASSES.DOCS_TREE_CHEVRON} aria-hidden={ATTR_VALUES.TRUE} />
+          )}
           {treeIcon(node, open)}
           {node.name}
         </a>
@@ -129,7 +143,11 @@ const gridCards = (view: ViewDocs, nodes: DocsNode[]): HTMLElement[] =>
             view.pickNode(node)
           }}
         >
-          <span className={DOCS_CLASSES.DOCS_CARD_ART}>{folderSvg(node.name, isDir)}</span>
+          {/* Card art mirrors the treeview icon pack — same animated
+              glyph vocabulary (folder sheets / kind pack) at card size. */}
+          <span className={DOCS_CLASSES.DOCS_CARD_ART}>
+            {treeIcon(node, isDir && view.isDirOpen(node.path))}
+          </span>
           <span className={DOCS_CLASSES.DOCS_CARD_LABEL}>{node.name}</span>
         </a>
       </h3>
@@ -512,12 +530,16 @@ export const renderDocs = (view: ViewDocs) => {
                 id={DOCS_IDS.VIEWER}
               >
                 <div className={DOCS_CLASSES.DOCS_VIEWER_HEAD}>
+                  {/* Square glyph button — the project's hairline-corner
+                      control pattern (same shape as the map zoom). */}
                   <button
                     type={FORM_ATTRS.TYPE_BUTTON}
                     className={DOCS_CLASSES.DOCS_VIEWER_BACK}
+                    aria-label={DOCS_STRINGS.VIEWER_BACK}
+                    title={DOCS_STRINGS.VIEWER_BACK}
                     onClick={() => view.closeFile()}
                   >
-                    {DOCS_STRINGS.VIEWER_BACK}
+                    {ARROW_GLYPHS.PREV}
                   </button>
                   {/* The open file is a real heading — AT heading-jump lands
                     on the document being read. */}

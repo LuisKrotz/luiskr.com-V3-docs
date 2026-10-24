@@ -61,6 +61,13 @@ export const mountDocsGlStrip = (
 
   if (!built) return null
 
+  // Fullscreen overwrite — blending is not just useless here, it's a bug:
+  // the quad writes every pixel each frame and the buffer is never
+  // cleared, so on drivers that keep the drawing buffer across presents
+  // `a = src.a + dst.a·(1−src.a)` converges to 1 and the strip becomes an
+  // opaque `u_col` veil — in dark mode a solid WHITE layer over the page.
+  gl.disable(gl.BLEND)
+
   const res: QuadGLResources = { gl, program: built.program, quadBuffer: built.quadBuffer }
 
   const uniforms = getUniforms(gl, built.program, { t: 'u_t', r: 'u_res', c: 'u_col' })
