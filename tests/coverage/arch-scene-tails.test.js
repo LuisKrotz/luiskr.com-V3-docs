@@ -226,9 +226,45 @@ jest.unstable_mockModule('three', () => {
     },
     MeshStandardMaterial: Disposable,
     BufferGeometry,
-    Float32BufferAttribute: class {},
-    LineSegments: class {},
-    LineBasicMaterial: Disposable,
+    // Instanced wireframe geometry — the glyph tiers drive instanced
+    // draws through instanceCount + instanced attribute streams.
+    InstancedBufferGeometry: class extends BufferGeometry {
+      constructor() {
+        super()
+
+        this.instanceCount = 0
+      }
+    },
+    Float32BufferAttribute: class {
+      constructor(array, itemSize = 1) {
+        this.array = array
+        this.itemSize = itemSize
+      }
+    },
+    // LineSegments keeps its geometry + material — the glyph tier is
+    // asserted through them (wire verts, instanced attrs, shader patch).
+    LineSegments: class extends Mesh {
+      constructor(geometry, material) {
+        super(geometry, material)
+
+        this.isLineSegments = true
+      }
+    },
+    LineBasicMaterial: class extends Disposable {
+      constructor(opts = {}) {
+        super()
+
+        Object.assign(this, opts)
+      }
+    },
+    FogExp2: class extends Disposable {
+      constructor(color, density) {
+        super()
+
+        this.color = color
+        this.density = density
+      }
+    },
     AmbientLight: class {},
     Color,
     Sprite,
@@ -1205,7 +1241,7 @@ describe('docs architecture scene', () => {
     canvas.remove()
   })
 
-  test('the node-material shader patch injects pulse + instanced alpha', async () => {
+  test('the glyph-material shader patch injects spin + bob + instanced ink', async () => {
     const { Scene } = await import('three')
 
     const canvas = document.createElement(HTML_TAGS.CANVAS)
@@ -1216,17 +1252,49 @@ describe('docs architecture scene', () => {
 
     await flush()
 
-    const tier = Scene.lastInstance.children.find((c) => c.isInstancedMesh)
+    const glyph = Scene.lastInstance.children.find((c) => c.isLineSegments)
 
     // The mock renderer never compiles programs — invoke the patch
     // hook the way three would at first render.
     const shader = { uniforms: {}, vertexShader: 'v', fragmentShader: 'f' }
 
-    tier.material.onBeforeCompile(shader)
+    glyph.material.onBeforeCompile(shader)
 
     expect(shader.uniforms.uTime.value).toBeGreaterThanOrEqual(0)
     expect(shader.vertexShader).toContain(DOCS_STRINGS.SCENE_ATTR_ALPHA)
-    expect(shader.fragmentShader).toContain('v')
+    expect(shader.vertexShader).toContain(DOCS_STRINGS.SCENE_ATTR_OFFSET)
+    expect(shader.vertexShader).toContain(DOCS_STRINGS.SCENE_ATTR_SPIN)
+    expect(shader.fragmentShader).toContain('vColor')
+
+    handle.destroy()
+    canvas.remove()
+  })
+
+  test('the edge material bobs link endpoints in phase with the glyphs', async () => {
+    const { Scene } = await import('three')
+
+    const canvas = document.createElement(HTML_TAGS.CANVAS)
+
+    document.body.appendChild(canvas)
+
+    const handle = mountArchScene(canvas, ROOTS, jest.fn())
+
+    await flush()
+
+    const lines = Scene.lastInstance.children.filter((c) => c.isLineSegments)
+
+    // Tiers first (dir + file glyphs), edge fan last — it owns the
+    // per-vertex aPhase attribute rather than instanced streams.
+    const edges = lines[lines.length - 1]
+
+    expect(edges.geometry.getAttribute(DOCS_STRINGS.SCENE_ATTR_PHASE)).toBeTruthy()
+
+    const shader = { uniforms: {}, vertexShader: 'v', fragmentShader: 'f' }
+
+    edges.material.onBeforeCompile(shader)
+
+    expect(shader.uniforms.uTime.value).toBeGreaterThanOrEqual(0)
+    expect(shader.vertexShader).toContain(DOCS_STRINGS.SCENE_ATTR_PHASE)
 
     handle.destroy()
     canvas.remove()
@@ -1570,6 +1638,93 @@ describe('docs architecture scene', () => {
 
     handle.destroy()
     canvas.remove()
+  })
+
+  test('a parseable --bg-primary arms the themed depth fog', async () => {
+    const { Scene } = await import('three')
+    const origGCS = globalThis.getComputedStyle
+
+    // Canvas color = accent ink; --bg-primary parses → FogExp2 mounts.
+    globalThis.getComputedStyle = () => ({
+      color: 'rgb(0, 255, 255)',
+      getPropertyValue: () => 'rgb(15, 23, 42)',
+    })
+
+    try {
+      const canvas = document.createElement(HTML_TAGS.CANVAS)
+
+      document.body.appendChild(canvas)
+
+      const handle = mountArchScene(canvas, ROOTS, jest.fn())
+
+      expect(handle).not.toBe(null)
+
+      await flush()
+
+      const fog = Scene.lastInstance.fog
+
+      expect(fog).toBeTruthy()
+      expect(fog.density).toBeGreaterThan(0)
+
+      handle.destroy()
+      canvas.remove()
+    } finally {
+      globalThis.getComputedStyle = origGCS
+    }
+  })
+
+  test('resolved probe inks land in the file tier aColor stream', async () => {
+    const { Scene } = await import('three')
+    const origGCS = globalThis.getComputedStyle
+
+    // Every probe resolves --icon-ink to a fixed neon; file glyph
+    // instances must carry it in aColor rather than the accent.
+    globalThis.getComputedStyle = (el) => ({
+      color: 'rgb(0, 255, 255)',
+      getPropertyValue: () =>
+        el.tagName === HTML_TAGS.SPAN.toUpperCase() ? 'rgb(247, 223, 30)' : '',
+    })
+
+    try {
+      const canvas = document.createElement(HTML_TAGS.CANVAS)
+
+      document.body.appendChild(canvas)
+
+      const handle = mountArchScene(canvas, ROOTS, jest.fn())
+
+      expect(handle).not.toBe(null)
+
+      await flush()
+
+      const glyphs = Scene.lastInstance.children.filter((c) => c.isLineSegments)
+
+      // The file glyph is the second instanced tier — its aColor rows
+      // must hold the probed ink ([247,223,30]/255), not the accent.
+      const cols = glyphs[1].geometry.getAttribute(DOCS_STRINGS.SCENE_ATTR_COLOR).array
+
+      expect(cols[0]).toBeCloseTo(247 / 255, 2)
+      expect(cols[1]).toBeCloseTo(223 / 255, 2)
+      expect(cols[2]).toBeCloseTo(30 / 255, 2)
+
+      handle.destroy()
+      canvas.remove()
+    } finally {
+      globalThis.getComputedStyle = origGCS
+    }
+  })
+
+  test('a detached canvas probes against itself and still mounts', async () => {
+    const canvas = document.createElement(HTML_TAGS.CANVAS)
+
+    // No appendChild — canvas.parentElement is null, so the ink probe
+    // host falls back to the canvas itself (parentElement ?? canvas).
+    const handle = mountArchScene(canvas, ROOTS, jest.fn())
+
+    expect(handle).not.toBe(null)
+
+    await flush()
+
+    handle.destroy()
   })
 
   test('destroy before the async graph build leaves the tiers empty', async () => {

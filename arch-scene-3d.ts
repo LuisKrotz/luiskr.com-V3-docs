@@ -7,8 +7,9 @@
  * pose, intro settle, node pulse, zoom-reveal labels, tap-slop picking,
  * setActive highlight, destroy teardown).
  *
- * Mapping from the three path: shared SphereGeometry → two
- * `gen_sphere` ids; per-node MeshBasicMaterial → `add_material_basic`
+ * Mapping from the three path: shared wireframe glyph segment lists →
+ * two `upload_geometry` ribbon meshes; per-node MeshBasicMaterial →
+ * `add_material_basic`
  * (per-node opacity/highlight writes go through `set_color`); the
  * LineSegments edge fan → one `upload_geometry` of cross-quad ribbons
  * (two perpendicular quads per edge — the engine has no line
@@ -29,11 +30,16 @@ import { bindOrbit } from '@core/utils/gpu/orbit-controller.js'
 import type { OrbitController } from '@core/utils/gpu/orbit-controller.js'
 import {
   computePositions,
+  dirWireVerts,
+  fileWireVerts,
   graphFit,
   makeLabelCanvas,
   placeRoots,
+  probeIconInks,
   readCamState,
+  wireBound,
 } from './arch-scene.js'
+import { kindFor } from './tree-icon.js'
 import type { ArchSceneHandle, PlacedNode } from './arch-scene.js'
 import type { DocsNode } from './manifest.js'
 
@@ -57,6 +63,12 @@ interface ArmNode {
   baseOpacity: number
   /** Active-highlight scale multiplier applied in the pulse write. */
   activeScale: number
+  /** Per-kind ink rgb — restored by the highlight pass; the wireframe
+   *  palette is per-node now, not one global ink. */
+  rgb: [number, number, number]
+  /** Bob phase / initial yaw — decorrelated per node (golden hashes). */
+  phase: number
+  spin: number
 }
 
 /** A dir label: sprite node + material + the zoom-reveal bucket. */
@@ -129,38 +141,36 @@ export const poseFromPos = (
 }
 
 /**
- * Expands the parent→child edge list into cross-quad ribbon geometry —
- * two perpendicular quads per edge (the engine draws triangles only;
+ * Expands a raw segment list into cross-quad ribbon geometry — two
+ * perpendicular quads per segment (the engine draws triangles only;
  * a crossed pair reads as a 1px line strip from every angle). SoA
  * upload: positions + zero normals (basic material is unlit) + zero
- * uvs + triangle indices.
- * @param placed Flattened tree.
- * @param positions xyz triplets per node.
+ * uvs + triangle indices. Shared by the edge fan and the wireframe
+ * node glyphs.
+ * @param segs Flat xyz pairs — every six floats are one segment.
+ * @param half Ribbon half-width in chart units.
  * @returns The four attribute arrays for `upload_geometry`.
  */
-export const buildEdges = (
-  placed: readonly PlacedNode[],
-  positions: Float32Array
+export const segmentsToRibbons = (
+  segs: ArrayLike<number>,
+  half: number
 ): { pos: Float32Array; nrm: Float32Array; uv: Float32Array; idx: Uint32Array } => {
-  const half = DOCS_UNITS.SCENE_EDGE_HALF
   const pos: number[] = []
   const idx: number[] = []
 
-  placed.forEach(({ parent }, i) => {
-    if (parent < 0) return
-
-    const ax = positions[i * 3]
-    const ay = positions[i * 3 + 1]
-    const az = positions[i * 3 + 2]
-    const bx = positions[parent * 3]
-    const by = positions[parent * 3 + 1]
-    const bz = positions[parent * 3 + 2]
+  for (let s = 0; s + 5 < segs.length; s += 6) {
+    const ax = segs[s]
+    const ay = segs[s + 1]
+    const az = segs[s + 2]
+    const bx = segs[s + 3]
+    const by = segs[s + 4]
+    const bz = segs[s + 5]
     const dx = bx - ax
     const dy = by - ay
     const dz = bz - az
     const len = Math.hypot(dx, dy, dz)
 
-    if (len < 1e-6) return
+    if (len < 1e-6) continue
 
     const nx = dx / len
     const ny = dy / len
@@ -229,7 +239,7 @@ export const buildEdges = (
 
       idx.push(b4, b4 + 1, b4 + 2, b4, b4 + 2, b4 + 3)
     }
-  })
+  }
 
   const nv = pos.length / 3
 
@@ -239,6 +249,35 @@ export const buildEdges = (
     uv: new Float32Array(nv * 2),
     idx: new Uint32Array(idx),
   }
+}
+
+/**
+ * Expands the parent→child edge list into cross-quad ribbon geometry
+ * via `segmentsToRibbons` at the edge half-width.
+ * @param placed Flattened tree.
+ * @param positions xyz triplets per node.
+ * @returns The four attribute arrays for `upload_geometry`.
+ */
+export const buildEdges = (
+  placed: readonly PlacedNode[],
+  positions: Float32Array
+): { pos: Float32Array; nrm: Float32Array; uv: Float32Array; idx: Uint32Array } => {
+  const segs: number[] = []
+
+  placed.forEach(({ parent }, i) => {
+    if (parent < 0) return
+
+    segs.push(
+      positions[i * 3],
+      positions[i * 3 + 1],
+      positions[i * 3 + 2],
+      positions[parent * 3],
+      positions[parent * 3 + 1],
+      positions[parent * 3 + 2]
+    )
+  })
+
+  return segmentsToRibbons(segs, DOCS_UNITS.SCENE_EDGE_HALF)
 }
 
 /**
@@ -399,9 +438,9 @@ export const mountArchScene3d = async (
 
       surface.set_color(
         p.mat,
-        ink[0],
-        ink[1],
-        ink[2],
+        p.rgb[0],
+        p.rgb[1],
+        p.rgb[2],
         isActive
           ? DOCS_UNITS.SCENE_ACTIVE_OPACITY
           : isAncestor
@@ -422,15 +461,45 @@ export const mountArchScene3d = async (
   const buildGraph = async (xyz: Float32Array) => {
     if (disposed) return
 
-    const dirGeo = surface.gen_sphere(DOCS_UNITS.SCENE_DIR_RADIUS, 12, 12, false)
-    const fileGeo = surface.gen_sphere(DOCS_UNITS.SCENE_FILE_RADIUS, 12, 12, false)
+    // Shared wireframe glyph geometries — the same folder/document
+    // segment lists the three arm instances, ribboned into cross-quads
+    // (the engine draws triangles only). One upload per glyph, shared
+    // by every node in the tier.
+    const dirWire = dirWireVerts()
+    const fileWire = fileWireVerts()
+    const dirRib = segmentsToRibbons(dirWire, DOCS_UNITS.SCENE_EDGE_HALF)
+    const fileRib = segmentsToRibbons(fileWire, DOCS_UNITS.SCENE_EDGE_HALF)
+
+    const dirGeo = surface.upload_geometry(dirRib.pos, dirRib.nrm, dirRib.uv, dirRib.idx, false)
+    const fileGeo = surface.upload_geometry(
+      fileRib.pos,
+      fileRib.nrm,
+      fileRib.uv,
+      fileRib.idx,
+      false
+    )
+
+    // Per-kind palette — same probe the three arm runs: file nodes wear
+    // their treeview icon ink, dirs + +N aggregates the accent.
+    const kinds = new Set<string>()
+
+    placed.forEach(({ node }) => {
+      if (node.type === 'file' && !node.aggregate) kinds.add(kindFor(node.name))
+    })
+
+    const kindInks = probeIconInks(canvas.parentElement ?? canvas, [...kinds])
 
     const labelJobs: Array<Promise<void>> = []
 
     placed.forEach(({ node }, i) => {
       const isDir = node.type !== 'file'
       const opacity = isDir ? DOCS_UNITS.SCENE_DIR_OPACITY : DOCS_UNITS.SCENE_FILE_OPACITY
-      const mat = surface.add_material_basic(ink[0], ink[1], ink[2], opacity, SCENE3D_NONE)
+      const rgb: [number, number, number] =
+        isDir || node.aggregate
+          ? ink
+          : ((kindInks.get(kindFor(node.name)) ?? ink) as [number, number, number])
+
+      const mat = surface.add_material_basic(rgb[0], rgb[1], rgb[2], opacity, SCENE3D_NONE)
 
       surface.set_material_flags(mat, 0, 0, true, true)
 
@@ -449,11 +518,14 @@ export const mountArchScene3d = async (
         x,
         y,
         z,
-        radius: isDir ? DOCS_UNITS.SCENE_DIR_RADIUS : DOCS_UNITS.SCENE_FILE_RADIUS,
+        radius: wireBound(isDir ? dirWire : fileWire),
         depth: placed[i].depth,
         path: node.path,
         baseOpacity: opacity,
         activeScale: 1,
+        rgb: [rgb[0], rgb[1], rgb[2]],
+        phase: i * DOCS_UNITS.SCENE_Y_HASH,
+        spin: i * DOCS_UNITS.SCENE_SPIN_HASH,
       })
 
       if (isDir) {
@@ -660,9 +732,12 @@ export const mountArchScene3d = async (
         surface.set_euler(graphRoot, 0, rootYaw, 0)
       }
 
-      // Node pulse — the same per-node sine the three arm writes into
-      // mesh.scale; every node id gets one scalar write (the engine
-      // dirty-marks its own transform).
+      // Node pulse + float + self-yaw — the reference's per-node motion.
+      // The three arm runs these in-shader; the engine has no instanced
+      // attribute path, so each pickable gets scale/position/euler
+      // writes in the same loop (edge ribbons stay anchored — the
+      // bobbed endpoints drift ±BOB_AMP off the wire ends, an accepted
+      // divergence on this debug-gated arm).
       for (let i = 0; i < pickables.length; i++) {
         const p = pickables[i]
         const s =
@@ -670,6 +745,13 @@ export const mountArchScene3d = async (
           p.activeScale
 
         surface.set_scale(p.node, s, s, s)
+        surface.set_position(
+          p.node,
+          p.x,
+          p.y + Math.sin(t * DOCS_UNITS.SCENE_BOB_SPEED + p.phase) * DOCS_UNITS.SCENE_BOB_AMP,
+          p.z
+        )
+        surface.set_euler(p.node, 0, t * DOCS_UNITS.SCENE_NODE_SPIN + p.spin, 0)
       }
 
       // Zoom-reveal labels — dirty-gated: alpha only writes when the

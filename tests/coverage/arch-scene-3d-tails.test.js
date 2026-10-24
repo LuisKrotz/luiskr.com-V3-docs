@@ -84,7 +84,7 @@ const makeSurface = () => {
   let tex = 0
 
   return {
-    calls: { positions: [], scales: [], colors: [], orbits: [], euler: [] },
+    calls: { positions: [], scales: [], colors: [], orbits: [], euler: [], materials: [] },
     frames: [],
     destroyed: false,
     resize() {},
@@ -101,7 +101,9 @@ const makeSurface = () => {
     upload_texture() {
       return ++tex
     },
-    add_material_basic() {
+    add_material_basic(r, g, b) {
+      this.calls.materials.push([r, g, b])
+
       return ++mat
     },
     add_material_sprite() {
@@ -348,6 +350,50 @@ describe('arch-scene-3d mount', () => {
 
     expect(mockSurface.destroyed).toBe(true)
     expect(mockCtl.disposed).toBe(true)
+  })
+
+  test('resolved probe inks reach the per-node file materials', async () => {
+    const origGCS = globalThis.getComputedStyle
+
+    // Probe spans resolve --icon-ink to a neon; the canvas keeps the
+    // accent. File materials must carry the probed rgb.
+    globalThis.getComputedStyle = (el) => ({
+      color: 'rgb(0, 255, 255)',
+      getPropertyValue: () =>
+        el.tagName === HTML_TAGS.SPAN.toUpperCase() ? 'rgb(247, 223, 30)' : '',
+    })
+
+    try {
+      const handle = await mountArchScene3d(canvas, ROOTS, jest.fn())
+
+      expect(handle).not.toBeNull()
+
+      await flush()
+
+      expect(mockSurface.calls.materials).toContainEqual([
+        expect.closeTo(247 / 255, 2),
+        expect.closeTo(223 / 255, 2),
+        expect.closeTo(30 / 255, 2),
+      ])
+
+      handle.destroy()
+    } finally {
+      globalThis.getComputedStyle = origGCS
+    }
+  })
+
+  test('a detached canvas probes inks against itself', async () => {
+    const detached = document.createElement(HTML_TAGS.CANVAS)
+
+    // parentElement is null — probeIconInks falls back to the canvas
+    // itself (canvas.parentElement ?? canvas).
+    const handle = await mountArchScene3d(detached, ROOTS, jest.fn())
+
+    expect(handle).not.toBeNull()
+
+    await flush()
+
+    handle.destroy()
   })
 
   test('restores the saved camera pose and skips the intro', async () => {

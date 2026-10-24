@@ -1096,7 +1096,7 @@ const NAME_KIND: Record<string, string> = {
  * @param name File display name.
  * @returns A DOCS_ICON_KINDS value.
  */
-const kindFor = (name: string): string => {
+export const kindFor = (name: string): string => {
   const lower = name.toLowerCase()
 
   if (lower === DOCS_STRINGS.INDEX_FILE) return DOCS_CLASSES.DOCS_ICON_KINDS.WEB

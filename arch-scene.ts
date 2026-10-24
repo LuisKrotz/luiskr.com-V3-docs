@@ -29,6 +29,10 @@ import { CACHE_STORAGE_KEYS } from '@core/tokens/data/storage.js'
 import { TYPE_STRINGS } from '@core/tokens/strings/types.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 import { DOCS_STRINGS, DOCS_UNITS } from '@core/tokens/strings/docs.js'
+import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
+import { THEME_CSS_PROPS } from '@core/tokens/css/theme.js'
+import { parseCssColor } from '@core/utils/canvas/css-color.js'
+import { kindFor } from './tree-icon.js'
 import { NET_STRINGS } from '@core/tokens/strings/net.js'
 import { HTML_TAGS } from '@core/tokens/elements/html.js'
 import {
@@ -105,33 +109,92 @@ const GLSL_COLOR_FRAGMENT = '#include <color_fragment>'
 /** Instanced-attribute names shared by the geometry buffers and the GLSL. */
 const ATTR_A_ALPHA = DOCS_STRINGS.SCENE_ATTR_ALPHA
 const ATTR_A_ACTIVE = DOCS_STRINGS.SCENE_ATTR_ACTIVE
+const ATTR_A_OFFSET = DOCS_STRINGS.SCENE_ATTR_OFFSET
+const ATTR_A_COLOR = DOCS_STRINGS.SCENE_ATTR_COLOR
+const ATTR_A_PHASE = DOCS_STRINGS.SCENE_ATTR_PHASE
+const ATTR_A_SPIN = DOCS_STRINGS.SCENE_ATTR_SPIN
 
-const instancedVertexPreamble = `uniform float uTime;\nattribute float ${ATTR_A_ALPHA};\nattribute float ${ATTR_A_ACTIVE};\nvarying float vAlpha;\n`
+/**
+ * Wireframe-glyph shader contract — the procedural-directory reference's
+ * per-node motion and per-kind ink run entirely in the vertex/fragment
+ * stages so ~7k glyph instances cost one draw call per tier and ZERO
+ * per-frame CPU writes:
+ *
+ *   p      = rotY(uTime·SPIN + aSpin) · position        — node self-yaw
+ *   p     *= (1 + sin(uTime·PULSE + i·0.7)·AMP)         — ambient pulse
+ *          · (1 + aActive·(SCENE_ACTIVE_SCALE − 1))     — active pop
+ *   off    = aOffset + (0, sin(uTime·BOB + aPhase)·BAMP, 0)
+ *   result = p + off                                   — bob + place
+ *
+ * `aColor` carries the file's icon-pack ink (dir accent for folders and
+ * +N aggregates); `aAlpha`/`aActive` are the highlight-pass streams —
+ * all instanced, written only when the graph or highlight changes.
+ */
+const glyphVertexPreamble =
+  `uniform float uTime;\n` +
+  `attribute vec3 ${ATTR_A_OFFSET};\n` +
+  `attribute vec3 ${ATTR_A_COLOR};\n` +
+  `attribute float ${ATTR_A_PHASE};\n` +
+  `attribute float ${ATTR_A_SPIN};\n` +
+  `attribute float ${ATTR_A_ALPHA};\n` +
+  `attribute float ${ATTR_A_ACTIVE};\n` +
+  `varying vec3 vColor;\nvarying float vAlpha;\n`
 
-const instancedVertexPulse =
+const glyphVertexTransform =
   `${GLSL_BEGIN_VERTEX}\n` +
-  `transformed *= (1.0 + sin(uTime * ${DOCS_UNITS.SCENE_PULSE_SPEED} + float(gl_InstanceID) * 0.7) * ${DOCS_UNITS.SCENE_PULSE_AMP}) * (1.0 + ${ATTR_A_ACTIVE} * ${DOCS_UNITS.SCENE_ACTIVE_SCALE - 1.0});\n` +
+  `float _sa = uTime * ${DOCS_UNITS.SCENE_NODE_SPIN} + ${ATTR_A_SPIN};\n` +
+  `float _sc = cos(_sa), _ss = sin(_sa);\n` +
+  `vec3 _p = vec3(transformed.x * _sc - transformed.z * _ss, transformed.y, transformed.x * _ss + transformed.z * _sc);\n` +
+  `_p *= (1.0 + sin(uTime * ${DOCS_UNITS.SCENE_PULSE_SPEED} + float(gl_InstanceID) * 0.7) * ${DOCS_UNITS.SCENE_PULSE_AMP}) * (1.0 + ${ATTR_A_ACTIVE} * ${DOCS_UNITS.SCENE_ACTIVE_SCALE - 1.0});\n` +
+  `vec3 _off = ${ATTR_A_OFFSET};\n` +
+  `_off.y += sin(uTime * ${DOCS_UNITS.SCENE_BOB_SPEED} + ${ATTR_A_PHASE}) * ${DOCS_UNITS.SCENE_BOB_AMP};\n` +
+  `transformed = _p + _off;\n` +
+  `vColor = ${ATTR_A_COLOR};\n` +
   `vAlpha = ${ATTR_A_ALPHA};\n`
 
-const instancedFragmentPreamble = 'varying float vAlpha;\n'
+const glyphFragmentPreamble = 'varying vec3 vColor;\nvarying float vAlpha;\n'
 
-const instancedFragmentAlpha = `${GLSL_COLOR_FRAGMENT}\ndiffuseColor.a *= vAlpha;\n`
+const glyphFragmentInk = `${GLSL_COLOR_FRAGMENT}\ndiffuseColor.rgb = vColor;\ndiffuseColor.a *= vAlpha;\n`
+
+/**
+ * Edge shader contract — each endpoint vertex carries its node's bob
+ * phase in `aPhase`, so the parent→child link endpoints ride the exact
+ * same sine the glyph centers do and links stay glued while the
+ * network floats. No per-frame CPU rewrites of edge buffers.
+ */
+const edgeVertexPreamble = `uniform float uTime;\nattribute float ${ATTR_A_PHASE};\n`
+
+const edgeVertexBob =
+  `${GLSL_BEGIN_VERTEX}\n` +
+  `transformed = vec3(transformed.x, transformed.y + sin(uTime * ${DOCS_UNITS.SCENE_BOB_SPEED} + ${ATTR_A_PHASE}) * ${DOCS_UNITS.SCENE_BOB_AMP}, transformed.z);\n`
 
 /**
  * Patches a node material so the pulse scale and per-instance alpha run
  * in-shader: `uTime` is the shared clock, `aAlpha`/`aActive` are the
  * instanced attribute streams the highlight pass rewrites on demand.
  */
-const patchNodeMaterial = (mat: THREE.MeshBasicMaterial, pulseTime: { value: number }): void => {
+const patchGlyphMaterial = (mat: THREE.LineBasicMaterial, clock: { value: number }): void => {
   mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uTime = pulseTime
+    shader.uniforms.uTime = clock
 
     shader.vertexShader =
-      instancedVertexPreamble + shader.vertexShader.replace(GLSL_BEGIN_VERTEX, instancedVertexPulse)
+      glyphVertexPreamble + shader.vertexShader.replace(GLSL_BEGIN_VERTEX, glyphVertexTransform)
 
     shader.fragmentShader =
-      instancedFragmentPreamble +
-      shader.fragmentShader.replace(GLSL_COLOR_FRAGMENT, instancedFragmentAlpha)
+      glyphFragmentPreamble + shader.fragmentShader.replace(GLSL_COLOR_FRAGMENT, glyphFragmentInk)
+  }
+}
+
+/**
+ * Patches the edge material with the shared clock so link endpoints
+ * bob in phase with their node glyphs.
+ */
+const patchEdgeMaterial = (mat: THREE.LineBasicMaterial, clock: { value: number }): void => {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = clock
+
+    shader.vertexShader =
+      edgeVertexPreamble + shader.vertexShader.replace(GLSL_BEGIN_VERTEX, edgeVertexBob)
   }
 }
 
@@ -239,6 +302,169 @@ export const computePositions = async (placed: PlacedNode[]): Promise<Float32Arr
   return xyz && xyz.length === depths.length * 3
     ? new Float32Array(xyz)
     : layoutPositionsJs(depths, angles)
+}
+
+/**
+ * Wireframe folder glyph — the procedural-directory reference shape:
+ * a front panel (top edge slightly lower, the open-mouth read), a
+ * taller back panel, a tab on the back's top-left, and the depth
+ * connectors that make it read as a 3D box from any orbit angle.
+ * Pure vertex math — no textures, no imported geometry. Scaled to
+ * SCENE_DIR_RADIUS. Exported: the scene3d arm ribbons the same verts.
+ * @returns Flat xyz pairs — segment list for LINES drawing.
+ */
+export const dirWireVerts = (): Float32Array => {
+  const s = DOCS_UNITS.SCENE_DIR_RADIUS
+  const w = s
+  const h = s * 0.75
+  const d = s * 0.15
+  const tabW = s * 0.6
+  const tabH = s * 0.2
+
+  const v: number[] = []
+  const L = (a: number[], b: number[]): void => {
+    v.push(a[0], a[1], a[2], b[0], b[1], b[2])
+  }
+
+  const fBL = [-w, -h, d]
+  const fBR = [w, -h, d]
+  const fTR = [w, h - s * 0.2, d]
+  const fTL = [-w, h - s * 0.2, d]
+
+  const bBL = [-w, -h, -d]
+  const bBR = [w, -h, -d]
+  const bTR = [w, h, -d]
+  const bTL = [-w, h, -d]
+
+  const tTL = [-w, h + tabH, -d]
+  const tTR = [-w + tabW, h + tabH, -d]
+  const tBR = [-w + tabW + s * 0.1, h, -d]
+
+  // Front panel rectangle.
+  L(fBL, fBR)
+  L(fBR, fTR)
+  L(fTR, fTL)
+  L(fTL, fBL)
+  // Back panel (bottom, right, left — the top edge is the tab's line).
+  L(bBL, bBR)
+  L(bBR, bTR)
+  L(bBL, bTL)
+  // Tab up and over.
+  L(bTL, tTL)
+  L(tTL, tTR)
+  L(tTR, tBR)
+  L(tBR, bTR)
+  // Depth connectors front→back.
+  L(fBL, bBL)
+  L(fBR, bBR)
+  L(fTR, bTR)
+  L(fTL, bTL)
+
+  return new Float32Array(v)
+}
+
+/**
+ * Wireframe document glyph — folded-corner page outline + inner fold
+ * diagonal + three text-rule lines (the reference file shape). Scaled
+ * to SCENE_FILE_RADIUS·1.3 so leaf glyphs read smaller than folders
+ * (the container/item size ratio of the reference). Exported: the
+ * scene3d arm ribbons the same verts.
+ * @returns Flat xyz pairs — segment list for LINES drawing.
+ */
+export const fileWireVerts = (): Float32Array => {
+  const s = DOCS_UNITS.SCENE_FILE_RADIUS * 1.3
+  const w = s * 0.7
+  const h = s
+  const c = s * 0.3
+
+  const v: number[] = []
+  const L = (a: number[], b: number[]): void => {
+    v.push(a[0], a[1], a[2], b[0], b[1], b[2])
+  }
+
+  const bl = [-w, -h, 0]
+  const br = [w, -h, 0]
+  const tr1 = [w, h - c, 0]
+  const tr2 = [w - c, h, 0]
+  const tl = [-w, h, 0]
+  const fold = [w - c, h - c, 0]
+
+  // Page outline + fold diagonal.
+  L(bl, br)
+  L(br, tr1)
+  L(tr1, tr2)
+  L(tr2, tl)
+  L(tl, bl)
+  L(tr2, fold)
+  L(fold, tr1)
+  // Text-rule lines — the "contents" read.
+  for (let i = 0; i < 3; i++) {
+    const ly = -s * 0.2 - i * s * 0.3
+
+    L([-w + s * 0.2, ly, 0], [w - s * 0.2, ly, 0])
+  }
+
+  return new Float32Array(v)
+}
+
+/**
+ * Bounding radius of a wire segment list — the invisible pick-sphere
+ * radius (wire glyphs have no triangle surface to raycast, so picking
+ * runs against instanced spheres sized to the glyph's exact bound).
+ * Exported: the scene3d arm sizes its JS-side pick spheres from the
+ * same bound.
+ * @param verts Flat xyz pairs.
+ */
+export const wireBound = (verts: Float32Array): number => {
+  let m = 0
+
+  for (let i = 0; i < verts.length; i += 3) {
+    const r = Math.hypot(verts[i], verts[i + 1], verts[i + 2])
+
+    if (r > m) m = r
+  }
+
+  return m
+}
+
+/**
+ * Per-kind ink probe — the map colors file nodes with the EXACT ink
+ * the treeview icon pack paints that extension's glyph, sampled off
+ * `docs-tree-icon docs-tree-icon--<kind>` probe elements parked inside
+ * the portal's shadow root (icon SCSS is shadow-scoped; probes must
+ * live inside it for --icon-ink to resolve). `hidden` keeps the probe
+ * invisible — custom properties still compute. Returns null entries
+ * for unparseable/no-stylesheet environments (tests) — callers fall
+ * back to the dir accent ink.
+ * @param host  Element inside the .docs shadow tree (canvas's parent).
+ * @param kinds Distinct icon kinds to sample.
+ */
+export const probeIconInks = (
+  host: Element,
+  kinds: readonly string[]
+): Map<string, number[] | null> => {
+  const out = new Map<string, number[] | null>()
+  const probes: HTMLElement[] = []
+
+  kinds.forEach((kind) => {
+    const probe = document.createElement(HTML_TAGS.SPAN)
+
+    probe.className = `${DOCS_CLASSES.DOCS_TREE_ICON} ${DOCS_CLASSES.DOCS_TREE_ICON}--${kind}`
+    probe.hidden = true
+
+    host.appendChild(probe)
+
+    probes.push(probe)
+
+    out.set(
+      kind,
+      parseCssColor(getComputedStyle(probe).getPropertyValue(DOCS_STRINGS.SCENE_ICON_INK_PROP))
+    )
+  })
+
+  probes.forEach((p) => p.remove())
+
+  return out
 }
 
 /**
@@ -377,7 +603,12 @@ const capSceneLeaves = (node: DocsNode, depth = 1): DocsNode => {
   const hidden = files.length - shown.size
 
   if (hidden > 0) {
-    children.push({ type: 'file', name: `+${hidden}`, path: node.path })
+    children.push({
+      type: 'file',
+      name: `${DOCS_STRINGS.AGGREGATE_MARK}${hidden}`,
+      path: node.path,
+      aggregate: true,
+    })
   }
 
   return { ...node, children }
@@ -482,7 +713,7 @@ export const mountArchSceneThree = (
 
   const placed = placeRoots(roots)
 
-  const { camDist, far } = graphFit(placed)
+  const { graphR, camDist, far } = graphFit(placed)
 
   camera.position.set(0, camDist * DOCS_UNITS.SCENE_CAMERA_LIFT, camDist)
 
@@ -598,17 +829,41 @@ export const mountArchSceneThree = (
 
   scene.add(new THREE.AmbientLight(0xffffff, 1))
 
+  // Depth fog — the reference's dark-slate depth cue, themed: the fog
+  // color is the page's own --bg-primary, so the far rim dissolves into
+  // whatever backdrop sits behind the transparent canvas in either
+  // theme. Density scales with the manifest's real radius.
+  const fogRgb = parseCssColor(
+    getComputedStyle(canvas).getPropertyValue(THEME_CSS_PROPS.BG_PRIMARY)
+  )
+
+  if (fogRgb) {
+    scene.fog = new THREE.FogExp2(
+      new THREE.Color(fogRgb[0], fogRgb[1], fogRgb[2]),
+      DOCS_UNITS.SCENE_FOG_DENSITY / graphR
+    )
+  }
+
   const labels: LabelRef[] = []
 
   /**
-   * Node draw calls — every dir sphere renders through ONE InstancedMesh,
-   * every file sphere through another, so the multi-thousand-node graph
-   * costs two draws instead of one call per node (plus the line set and
-   * the revealed labels). Weak GPUs/tablets keep their frame budget.
+   * Node draw calls — the procedural-directory look: every directory
+   * renders the wireframe folder glyph, every file the folded-page
+   * glyph, each through ONE instanced LineSegments draw so the
+   * multi-thousand-node graph costs two draw calls (plus the edge set
+   * and revealed labels). Picking runs against invisible instanced
+   * spheres — wire lines have no surface to raycast and three's line
+   * raycast has no instancing path; the pick tier shares the highlight
+   * attribute buffers with the glyph geometry.
    */
   let dirMesh: THREE.InstancedMesh | null = null
 
   let fileMesh: THREE.InstancedMesh | null = null
+
+  /** The instanced wireframe glyph draws — disposed with the scene. */
+  let dirGlyph: THREE.LineSegments | null = null
+
+  let fileGlyph: THREE.LineSegments | null = null
 
   /** placed[] index per instance slot — a raycast instanceId resolves to a node. */
   const dirPlaced: number[] = []
@@ -621,8 +876,10 @@ export const mountArchSceneThree = (
   /** Shared pulse clock — patched into both node materials' shaders. */
   const pulseTime = { value: 0 }
 
-  /** Edge geometry — assigned inside buildGraph, disposed in destroy(). */
+  /** Edge geometry + material — assigned inside buildGraph, disposed in destroy(). */
   let lineGeo: THREE.BufferGeometry | null = null
+
+  let edgeMat: THREE.LineBasicMaterial | null = null
 
   let disposed = false
 
@@ -718,51 +975,130 @@ export const mountArchSceneThree = (
     const m4 = new THREE.Matrix4()
 
     /**
-     * Builds one instanced tier — shared sphere geometry, one material,
-     * static instance matrices, and the two instanced attribute streams
-     * (alpha / active) the highlight pass owns.
+     * Builds one instanced tier — the wireframe glyph as a single
+     * instanced LineSegments draw (aOffset/aColor/aPhase/aSpin +
+     * aAlpha/aActive drive the vertex shader) plus the invisible
+     * instanced pick sphere. The pick geometry SHARES the alpha/active
+     * attribute objects with the glyph geometry, so the highlight pass
+     * keeps writing one buffer both visuals read.
+     * @param verts       Wire segment list (flat xyz pairs).
+     * @param baseOpacity Resting alpha for the tier.
+     * @param idxs        placed[] indexes in this tier.
+     * @param rgbOf       Per-node ink resolver (icon-pack palette).
+     * @returns {glyph, pick} — draw object + pick mesh.
      */
     const buildTier = (
-      radius: number,
+      verts: Float32Array,
       baseOpacity: number,
-      idxs: number[]
-    ): THREE.InstancedMesh => {
-      const geo = new THREE.SphereGeometry(radius, 12, 12)
+      idxs: number[],
+      rgbOf: (_pi: number) => number[]
+    ): { glyph: THREE.LineSegments; pick: THREE.InstancedMesh } => {
+      const n = idxs.length
+      const offs = new Float32Array(n * 3)
+      const cols = new Float32Array(n * 3)
+      const phases = new Float32Array(n)
+      const spins = new Float32Array(n)
+      const alphaAttr = new THREE.InstancedBufferAttribute(new Float32Array(n).fill(baseOpacity), 1)
+      const activeAttr = new THREE.InstancedBufferAttribute(new Float32Array(n), 1)
 
-      const mat = new THREE.MeshBasicMaterial({ color: inkColor, transparent: true })
+      idxs.forEach((pi, k) => {
+        const p = positions[pi]
+        const rgb = rgbOf(pi)
 
-      patchNodeMaterial(mat, pulseTime)
+        offs[k * 3] = p.x
+        offs[k * 3 + 1] = p.y
+        offs[k * 3 + 2] = p.z
+        cols[k * 3] = rgb[0]
+        cols[k * 3 + 1] = rgb[1]
+        cols[k * 3 + 2] = rgb[2]
 
-      const mesh = new THREE.InstancedMesh(geo, mat, idxs.length)
+        // Golden-angle hashes — decorrelated bob phase + initial yaw
+        // so neighboring glyphs never animate in lockstep.
+        phases[k] = pi * DOCS_UNITS.SCENE_Y_HASH
+        spins[k] = pi * DOCS_UNITS.SCENE_SPIN_HASH
+      })
 
-      geo.setAttribute(
-        ATTR_A_ALPHA,
-        new THREE.InstancedBufferAttribute(new Float32Array(idxs.length).fill(baseOpacity), 1)
-      )
+      const geo = new THREE.InstancedBufferGeometry()
 
-      geo.setAttribute(
-        ATTR_A_ACTIVE,
-        new THREE.InstancedBufferAttribute(new Float32Array(idxs.length), 1)
-      )
+      geo.instanceCount = n
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+      geo.setAttribute(ATTR_A_OFFSET, new THREE.InstancedBufferAttribute(offs, 3))
+      geo.setAttribute(ATTR_A_COLOR, new THREE.InstancedBufferAttribute(cols, 3))
+      geo.setAttribute(ATTR_A_PHASE, new THREE.InstancedBufferAttribute(phases, 1))
+      geo.setAttribute(ATTR_A_SPIN, new THREE.InstancedBufferAttribute(spins, 1))
+      geo.setAttribute(ATTR_A_ALPHA, alphaAttr)
+      geo.setAttribute(ATTR_A_ACTIVE, activeAttr)
+
+      const mat = new THREE.LineBasicMaterial({ transparent: true })
+
+      patchGlyphMaterial(mat, pulseTime)
+
+      const glyph = new THREE.LineSegments(geo, mat)
+
+      // Instance positions live in aOffset — the geometry's own bound
+      // is a single glyph at origin; culling on it would drop the tier.
+      glyph.frustumCulled = false
+
+      scene.add(glyph)
+
+      // Invisible instanced pick spheres — wire lines carry no raycast
+      // surface. Sharing alphaAttr/activeAttr keeps writeActive single-
+      // buffer: the glyph shader sees the same writes the tests read
+      // back off the pick geometry.
+      const pickGeo = new THREE.SphereGeometry(wireBound(verts), 12, 12)
+
+      pickGeo.setAttribute(ATTR_A_ALPHA, alphaAttr)
+      pickGeo.setAttribute(ATTR_A_ACTIVE, activeAttr)
+
+      const pick = new THREE.InstancedMesh(pickGeo, new THREE.MeshBasicMaterial(), n)
+
+      pick.visible = false
 
       idxs.forEach((pi, k) => {
         m4.setPosition(positions[pi])
 
-        mesh.setMatrixAt(k, m4)
+        pick.setMatrixAt(k, m4)
       })
 
-      mesh.instanceMatrix.needsUpdate = true
+      pick.instanceMatrix.needsUpdate = true
 
-      scene.add(mesh)
+      scene.add(pick)
 
-      pickTables.set(mesh, idxs)
+      pickTables.set(pick, idxs)
 
-      return mesh
+      return { glyph, pick }
     }
 
-    dirMesh = buildTier(DOCS_UNITS.SCENE_DIR_RADIUS, DOCS_UNITS.SCENE_DIR_OPACITY, dirPlaced)
+    const dirWire = dirWireVerts()
+    const fileWire = fileWireVerts()
 
-    fileMesh = buildTier(DOCS_UNITS.SCENE_FILE_RADIUS, DOCS_UNITS.SCENE_FILE_OPACITY, filePlaced)
+    // Per-kind palette — file nodes wear the treeview icon pack's own
+    // ink (yellow .js, blue .ts, orange .html…) so the map reads with
+    // the same color code as the file list. Probes resolve inside the
+    // shadow root; missing styles fall back to the dir accent ink.
+    const kinds = new Set<string>()
+
+    placed.forEach(({ node }) => {
+      if (node.type === 'file' && !node.aggregate) kinds.add(kindFor(node.name))
+    })
+
+    const kindInks = probeIconInks(canvas.parentElement ?? canvas, [...kinds])
+
+    const accentRgb = parseCssColor(ink) ?? [1, 1, 1]
+
+    const dirTier = buildTier(dirWire, DOCS_UNITS.SCENE_DIR_OPACITY, dirPlaced, () => accentRgb)
+
+    dirMesh = dirTier.pick
+    dirGlyph = dirTier.glyph
+
+    const fileTier = buildTier(fileWire, DOCS_UNITS.SCENE_FILE_OPACITY, filePlaced, (pi) =>
+      placed[pi].node.aggregate
+        ? accentRgb
+        : (kindInks.get(kindFor(placed[pi].node.name)) ?? accentRgb)
+    )
+
+    fileMesh = fileTier.pick
+    fileGlyph = fileTier.glyph
 
     placed.forEach(({ node, depth }, i) => {
       if (node.type === 'file' || depth > DOCS_UNITS.SCENE_LABEL_MAX_DEPTH) return
@@ -785,6 +1121,7 @@ export const mountArchSceneThree = (
     })
 
     const lineVerts: number[] = []
+    const linePhases: number[] = []
 
     placed.forEach(({ parent }, i) => {
       if (parent < 0) return
@@ -797,22 +1134,28 @@ export const mountArchSceneThree = (
         positions[parent].y,
         positions[parent].z
       )
+
+      // Each endpoint carries its node's bob phase — the same hash the
+      // glyph shader uses, so link ends ride the identical sine as the
+      // wireframes they connect (the reference's per-frame link update,
+      // but free on the GPU).
+      linePhases.push(i * DOCS_UNITS.SCENE_Y_HASH, parent * DOCS_UNITS.SCENE_Y_HASH)
     })
 
     lineGeo = new THREE.BufferGeometry()
 
     lineGeo.setAttribute('position', new THREE.Float32BufferAttribute(lineVerts, 3))
+    lineGeo.setAttribute(ATTR_A_PHASE, new THREE.Float32BufferAttribute(linePhases, 1))
 
-    scene.add(
-      new THREE.LineSegments(
-        lineGeo,
-        new THREE.LineBasicMaterial({
-          color: inkColor,
-          transparent: true,
-          opacity: DOCS_UNITS.SCENE_LINE_OPACITY,
-        })
-      )
-    )
+    edgeMat = new THREE.LineBasicMaterial({
+      color: inkColor,
+      transparent: true,
+      opacity: DOCS_UNITS.SCENE_LINE_OPACITY,
+    })
+
+    patchEdgeMaterial(edgeMat, pulseTime)
+
+    scene.add(new THREE.LineSegments(lineGeo, edgeMat))
 
     // The highlight/focus may have been set while positions were in
     // flight — re-apply both now that the meshes + targets exist.
@@ -1142,6 +1485,14 @@ export const mountArchSceneThree = (
         m.dispose()
       })
 
+      ;[dirGlyph, fileGlyph].forEach((g) => {
+        if (!g) return
+
+        g.geometry.dispose()
+
+        ;(g.material as THREE.Material).dispose()
+      })
+
       labels.forEach(({ material }) => {
         material.map?.dispose()
 
@@ -1149,6 +1500,8 @@ export const mountArchSceneThree = (
       })
 
       lineGeo?.dispose()
+
+      edgeMat?.dispose()
 
       renderer.dispose()
     },

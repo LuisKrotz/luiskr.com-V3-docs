@@ -197,9 +197,34 @@ jest.unstable_mockModule('three', () => {
     },
     MeshStandardMaterial: Disposable,
     BufferGeometry,
-    Float32BufferAttribute: class {},
-    LineSegments: class {},
-    LineBasicMaterial: Disposable,
+    InstancedBufferGeometry: class extends BufferGeometry {
+      constructor() {
+        super()
+
+        this.instanceCount = 0
+      }
+    },
+    Float32BufferAttribute: class {
+      constructor(array, itemSize = 1) {
+        this.array = array
+        this.itemSize = itemSize
+      }
+    },
+    LineSegments: class extends Mesh {
+      constructor(geometry, material) {
+        super(geometry, material)
+
+        this.isLineSegments = true
+      }
+    },
+    LineBasicMaterial: class extends Disposable {
+      constructor(opts = {}) {
+        super()
+
+        Object.assign(this, opts)
+      }
+    },
+    FogExp2: Disposable,
     AmbientLight: class {},
     Color,
     Sprite,

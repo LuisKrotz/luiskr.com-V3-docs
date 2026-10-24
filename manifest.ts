@@ -25,6 +25,9 @@ export interface DocsNode {
   children?: DocsNode[]
   id?: string
   mtime?: string
+  /** Scene-only flag — `+N` aggregate leaves the leaf cap synthesizes
+   *  for surplus file children; the map colors them with the dir ink. */
+  aggregate?: boolean
 }
 
 /** A publishable root bucket (docs / reports / coverage-* / source modules). */
