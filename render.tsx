@@ -639,7 +639,7 @@ export const renderDocs = (view: ViewDocs) => {
           </section>
         </div>
 
-        {/* Architecture map — the interactive alternative nav surface:
+        {/* Interactive file cloud — the alternative nav surface:
             a right-hand column on ≥1025px (hidden under it), orbit/pinch
             on the persistent scene canvas, tap-to-pick navigates. The
             zoom trigger re-seats the SAME canvas into the centered glass
@@ -660,7 +660,9 @@ export const renderDocs = (view: ViewDocs) => {
               aria-controls={view._mapZoomed ? DOCS_IDS.MAP_MODAL : undefined}
               onClick={() => view.toggleMapZoom()}
             >
-              {CHAR_STRINGS.EXPAND_GLYPH}
+              <span className={DOCS_CLASSES.DOCS_MAP_ZOOM_ICON} aria-hidden={ATTR_VALUES.TRUE}>
+                {CHAR_STRINGS.EXPAND_GLYPH}
+              </span>
             </button>
           </div>
           {!view._mapZoomed && <div className={DOCS_CLASSES.DOCS_MAP_STAGE} />}

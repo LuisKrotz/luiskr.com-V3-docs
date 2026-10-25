@@ -2,7 +2,7 @@
  * @file arch-scene-3d-tails.test.js
  * @description Coverage tail for docs/arch-scene-3d.ts and the
  * scene3d composite arm in arch-scene.ts — the rust/WebGPU mount of
- * the architecture map. Covers the ink parser, pose conversion, edge
+ * the interactive file cloud. Covers the ink parser, pose conversion, edge
  * ribbon expansion (including the degenerate-perp and coincident-node
  * skips), the live-mount graph build (shared geometries, per-node
  * materials, cross-quad edges, bitmap labels), the tick loop (orbit
@@ -249,14 +249,16 @@ describe('arch-scene-3d helpers', () => {
 
     const e = buildEdges(placed, positions, scale)
 
-    // b + d edges only: 8 verts, 12 indices each → 16 verts, 24 idx —
-    // and each clipped endpoint sits clear of its glyph center by the
-    // bound + gap (the a-end pulls back from the origin node).
-    expect(e.pos.length).toBe(16 * 3)
-    expect(e.idx.length).toBe(24)
-    expect(e.nrm.length).toBe(16 * 3)
-    expect(e.uv.length).toBe(16 * 2)
-    expect(e.pos[0]).toBeGreaterThan(0)
+    // b + d edges only, all dir children → they land in the `dir` tier:
+    // 8 verts, 12 indices each → 16 verts, 24 idx — and each clipped
+    // endpoint sits clear of its glyph center by the bound + gap (the
+    // a-end pulls back from the origin node). The leaf tier stays empty.
+    expect(e.dir.pos.length).toBe(16 * 3)
+    expect(e.dir.idx.length).toBe(24)
+    expect(e.dir.nrm.length).toBe(16 * 3)
+    expect(e.dir.uv.length).toBe(16 * 2)
+    expect(e.dir.pos[0]).toBeGreaterThan(0)
+    expect(e.leaf.idx.length).toBe(0)
 
     // NaN positions survive the len guard (NaN < 1e-6 is false) and
     // propagate into the cross products — `ql || 1` keeps the second
@@ -267,7 +269,7 @@ describe('arch-scene-3d helpers', () => {
       new Float32Array([1, 1])
     )
 
-    expect(nan.idx.length).toBe(12)
+    expect(nan.dir.idx.length).toBe(12)
 
     // An over-close pair — centers nearer than the two glyph bounds +
     // gaps — drops the whole edge instead of drawing inside the faces.
@@ -277,7 +279,7 @@ describe('arch-scene-3d helpers', () => {
       new Float32Array([1, 1])
     )
 
-    expect(close.idx.length).toBe(0)
+    expect(close.dir.idx.length).toBe(0)
   })
 })
 
@@ -416,7 +418,7 @@ describe('arch-scene-3d mount', () => {
     handle.destroy()
   })
 
-  test('restores the saved camera pose and skips the intro', async () => {
+  test('restores the saved camera pose on remount', async () => {
     sessionStorage.setItem(
       CACHE_STORAGE_KEYS.DOCS_SCENE_STATE,
       JSON.stringify({ p: [0, 40, 50], t: [0, 0, 0], off: true })
@@ -425,12 +427,13 @@ describe('arch-scene-3d mount', () => {
     const handle = await mountArchScene3d(canvas, ROOTS, jest.fn())
 
     expect(handle).not.toBeNull()
+    // The map never self-rotates — orbiting is a user gesture only.
     expect(mockCtl.autoRotate).toBe(false)
 
     handle.destroy()
   })
 
-  test('control start stops autorotate and persists the pose', async () => {
+  test('control start disengages the focus glide and persists the pose', async () => {
     const handle = await mountArchScene3d(canvas, ROOTS, jest.fn())
 
     mockCtl.fire(ORBIT_EVENTS.START)
@@ -453,8 +456,8 @@ describe('arch-scene-3d mount', () => {
       return 1
     }
 
-    // Saved pose → introFrom stays 0 → rootYaw is fixed at 0, so the
-    // focus goal equals the node's raw world position.
+    // The graph never self-rotates, so the focus goal equals the
+    // node's raw world position.
     sessionStorage.setItem(
       CACHE_STORAGE_KEYS.DOCS_SCENE_STATE,
       JSON.stringify({ p: [0, 40, 50], t: [0, 0, 0], off: true })
@@ -631,11 +634,11 @@ describe('arch-scene-3d mount', () => {
     handle.destroy()
   })
 
-  test('tick covers the intro-skip, update-false, label-fade, env-fallback, catch and disposed arms', async () => {
-    // Saved pose → introFrom = 0 → `if (introFrom)` else arm once ticked.
+  test('tick covers the update-false, label-fade, env-fallback, catch and disposed arms', async () => {
+    // A saved pose skips the default camera framing branch.
     sessionStorage.setItem(
       CACHE_STORAGE_KEYS.DOCS_SCENE_STATE,
-      JSON.stringify({ p: [0, 40, 50], t: [0, 0, 0], off: false })
+      JSON.stringify({ p: [0, 40, 50], t: [0, 0, 0] })
     )
 
     const origRaf = globalThis.requestAnimationFrame

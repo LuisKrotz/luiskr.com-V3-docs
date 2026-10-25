@@ -4,11 +4,12 @@
  * the three.js path renders to, rebuilds the radial tree through the
  * engine's flat u32-id API, and drives the frame loop through a
  * `bindOrbit` rig — the same contract as the three arm (saved camera
- * pose, intro settle, node pulse, zoom-reveal labels, tap-slop picking,
- * setActive highlight, destroy teardown).
+ * pose, camera-facing billboard glyphs, node pulse/bob, distance-scaled
+ * label reveal, tap-slop picking, setActive highlight, destroy
+ * teardown). The map never self-rotates: no autorotate, no intro turn.
  *
- * Mapping from the three path: shared wireframe glyph segment lists →
- * two `upload_geometry` ribbon meshes; per-node MeshBasicMaterial →
+ * Mapping from the three path: shared filled glyph triangle soups →
+ * two `upload_geometry` meshes; per-node MeshBasicMaterial →
  * `add_material_basic`
  * (per-node opacity/highlight writes go through `set_color`); the
  * LineSegments edge fan → one `upload_geometry` of cross-quad ribbons
@@ -23,6 +24,7 @@ import { CACHE_STORAGE_KEYS } from '@core/tokens/data/storage.js'
 import { TYPE_STRINGS } from '@core/tokens/strings/types.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 import { DOCS_UNITS } from '@core/tokens/strings/docs.js'
+import { THEME_CSS_PROPS } from '@core/tokens/css/theme.js'
 import { devWarn } from '@core/devlog.js'
 import { mountScene3d, resizeScene3d, SCENE3D_NONE } from '@core/utils/gpu/scene3d.js'
 import type { Scene3dSurface } from '@core/utils/gpu/scene3d.js'
@@ -31,15 +33,18 @@ import type { OrbitController } from '@core/utils/gpu/orbit-controller.js'
 import {
   clipEdge,
   computePositions,
-  dirWireVerts,
-  fileWireVerts,
+  dirFillVerts,
+  dirSeamVerts,
+  fileFillVerts,
+  fileSeamVerts,
   graphFit,
+  glyphBound,
   makeLabelCanvas,
   placeRoots,
+  probeFolderInk,
   probeIconInks,
   resolveScenePath,
   readCamState,
-  wireBound,
 } from './arch-scene.js'
 import { kindFor } from './tree-icon.js'
 import type { ArchSceneHandle, PlacedNode } from './arch-scene.js'
@@ -49,8 +54,11 @@ import type { DocsNode } from './manifest.js'
 interface ArmNode {
   /** Engine node id (set_position/set_scale/set_euler target). */
   node: number
-  /** Material id — `set_color` writes the live opacity. */
+  /** Fill material id — `set_color` writes the live opacity. */
   mat: number
+  /** Seam material id — the knockout strokes' material; the highlight
+   *  pass writes the same alpha to it so fills and seams fade together. */
+  seamMat: number
   /** World position — picking ray sphere-test center. */
   x: number
   y: number
@@ -67,12 +75,11 @@ interface ArmNode {
   baseOpacity: number
   /** Active-highlight scale multiplier applied in the pulse write. */
   activeScale: number
-  /** Per-kind ink rgb — restored by the highlight pass; the wireframe
+  /** Per-kind ink rgb — restored by the highlight pass; the glyph
    *  palette is per-node now, not one global ink. */
   rgb: [number, number, number]
-  /** Bob phase / initial yaw — decorrelated per node (golden hashes). */
+  /** Bob phase — decorrelated per node (golden-angle hash). */
   phase: number
-  spin: number
 }
 
 /** A dir label: sprite node + material + the zoom-reveal bucket. */
@@ -149,8 +156,8 @@ export const poseFromPos = (
  * perpendicular quads per segment (the engine draws triangles only;
  * a crossed pair reads as a 1px line strip from every angle). SoA
  * upload: positions + zero normals (basic material is unlit) + zero
- * uvs + triangle indices. Shared by the edge fan and the wireframe
- * node glyphs.
+ * uvs + triangle indices. Used by the edge fan; the filled glyphs
+ * upload through `trisToGeometry` instead.
  * @param segs Flat xyz pairs — every six floats are one segment.
  * @param half Ribbon half-width in chart units.
  * @returns The four attribute arrays for `upload_geometry`.
@@ -256,6 +263,30 @@ export const segmentsToRibbons = (
 }
 
 /**
+ * Packages a glyph triangle soup into the engine's SoA geometry
+ * payload — sequential indices over the unindexed soup, zero normals
+ * (the basic material is unlit) and zero uvs. Mirrors
+ * `segmentsToRibbons`'s return shape so both upload identically.
+ * @param tris Flat xyz triplets — every 9 floats one triangle.
+ * @returns The four attribute arrays for `upload_geometry`.
+ */
+export const trisToGeometry = (
+  tris: Float32Array
+): { pos: Float32Array; nrm: Float32Array; uv: Float32Array; idx: Uint32Array } => {
+  const n = tris.length / 3
+  const idx = new Uint32Array(n)
+
+  for (let i = 0; i < n; i++) idx[i] = i
+
+  return {
+    pos: tris,
+    nrm: new Float32Array(tris.length),
+    uv: new Float32Array(n * 2),
+    idx,
+  }
+}
+
+/**
  * Expands the parent→child edge list into cross-quad ribbon geometry
  * via `segmentsToRibbons` at the edge half-width.
  * @param placed Flattened tree.
@@ -266,13 +297,17 @@ export const buildEdges = (
   placed: readonly PlacedNode[],
   positions: Float32Array,
   scale: Float32Array
-): { pos: Float32Array; nrm: Float32Array; uv: Float32Array; idx: Uint32Array } => {
-  const segs: number[] = []
+): {
+  dir: { pos: Float32Array; nrm: Float32Array; uv: Float32Array; idx: Uint32Array }
+  leaf: { pos: Float32Array; nrm: Float32Array; uv: Float32Array; idx: Uint32Array }
+} => {
+  const dirSegs: number[] = []
+  const leafSegs: number[] = []
 
   // Links trim at glyph radius + SCENE_EDGE_GAP on both ends so lines
-  // never pierce an icon's wireframe (same contract as the three arm).
-  const dirBound = wireBound(dirWireVerts())
-  const fileBound = wireBound(fileWireVerts())
+  // never pierce an icon's filled faces (same contract as the three arm).
+  const dirBound = glyphBound(dirSeamVerts())
+  const fileBound = glyphBound(fileSeamVerts())
 
   placed.forEach(({ node, parent }, i) => {
     if (parent < 0) return
@@ -289,10 +324,16 @@ export const buildEdges = (
 
     if (!seg) return
 
-    segs.push(seg[0], seg[1], seg[2], seg[3], seg[4], seg[5])
+    // File-leaf links are the bulk of the web — they ride their own
+    // geometry so the mount dims them to SCENE_EDGE_LEAF of the dir
+    // skeleton's ink (same split as the three arm's two LineSegments).
+    ;(isDir ? dirSegs : leafSegs).push(seg[0], seg[1], seg[2], seg[3], seg[4], seg[5])
   })
 
-  return segmentsToRibbons(segs, DOCS_UNITS.SCENE_EDGE_HALF)
+  return {
+    dir: segmentsToRibbons(dirSegs, DOCS_UNITS.SCENE_EDGE_HALF),
+    leaf: segmentsToRibbons(leafSegs, DOCS_UNITS.SCENE_EDGE_HALF),
+  }
 }
 
 /**
@@ -333,13 +374,8 @@ export const mountArchScene3d = async (
     pitch: Math.atan(lift),
     minDistance: DOCS_UNITS.SCENE_BASE_RADIUS,
     maxDistance: far,
-    // OrbitControls autoRotateSpeed is "revolutions per 60 seconds·speed"
-    // — 2π·speed/60 rad/s.
-    autoRotateSpeed: (DOCS_UNITS.SCENE_ROTATE_SPEED * Math.PI * 2) / 60,
     damping: 0.08,
   })
-
-  ctl.autoRotate = true
 
   const saved = readCamState()
 
@@ -348,10 +384,9 @@ export const mountArchScene3d = async (
 
     ctl.setTarget(saved.t[0], saved.t[1], saved.t[2])
     ctl.setPose(d, yaw, pitch)
-    ctl.autoRotate = !saved.off
   }
 
-  /** Serializes camera pose + interaction flag into sessionStorage. */
+  /** Serializes camera pose into sessionStorage. */
   const saveCamState = () => {
     try {
       if (typeof sessionStorage === TYPE_STRINGS.UNDEFINED) return
@@ -364,7 +399,6 @@ export const mountArchScene3d = async (
           ctl.tz + ctl.distance * cp * Math.cos(ctl.yaw),
         ],
         t: [ctl.tx, ctl.ty, ctl.tz],
-        off: !ctl.autoRotate,
       }
 
       sessionStorage.setItem(CACHE_STORAGE_KEYS.DOCS_SCENE_STATE, JSON.stringify(state))
@@ -374,8 +408,6 @@ export const mountArchScene3d = async (
   }
 
   const onControlStart = () => {
-    ctl.autoRotate = false
-
     focus.on = false
 
     saveCamState()
@@ -390,10 +422,24 @@ export const mountArchScene3d = async (
   // f32 channels (no THREE.Color in this path).
   const ink = parseInk(getComputedStyle(canvas).color || '')
 
+  // Card-body ink — the page's own bg color so glyph faces read as the
+  // icon pack's dark paper and occlude the link web behind them on
+  // either theme; falls back to dimmed ink when --bg-primary can't be
+  // parsed (same contract as the three arm).
+  const faceCss = getComputedStyle(canvas).getPropertyValue(THEME_CSS_PROPS.BG_PRIMARY)
+
+  const faceRgb: [number, number, number] = faceCss
+    ? parseInk(faceCss)
+    : [
+        ink[0] * DOCS_UNITS.SCENE_SEAM_SHADE,
+        ink[1] * DOCS_UNITS.SCENE_SEAM_SHADE,
+        ink[2] * DOCS_UNITS.SCENE_SEAM_SHADE,
+      ]
+
   const pickables: ArmNode[] = []
   const labels: ArmLabel[] = []
 
-  /** Root group — the intro-settle euler target (three's scene.rotation). */
+  /** Root group — every node/edge/label parents under it. */
   const graphRoot = surface.add_group(SCENE3D_NONE)
 
   /** Docs path currently highlighted — '' matches the portal-root node. */
@@ -465,17 +511,16 @@ export const mountArchScene3d = async (
       const isActive = p.pi === activeIdx
       const isAncestor = !isActive && p.path !== CHAR_STRINGS.EMPTY && ancestors.has(p.path)
 
-      surface.set_color(
-        p.mat,
-        p.rgb[0],
-        p.rgb[1],
-        p.rgb[2],
-        isActive
-          ? DOCS_UNITS.SCENE_ACTIVE_OPACITY
-          : isAncestor
-            ? DOCS_UNITS.SCENE_ANCESTOR_OPACITY
-            : p.baseOpacity
-      )
+      const alpha = isActive
+        ? DOCS_UNITS.SCENE_ACTIVE_OPACITY
+        : isAncestor
+          ? DOCS_UNITS.SCENE_ANCESTOR_OPACITY
+          : p.baseOpacity
+
+      // Face = page-body ink (bg), seam strokes = the node's kind ink —
+      // the icon pack's dark-card + colored-outline read in 3D.
+      surface.set_color(p.mat, faceRgb[0], faceRgb[1], faceRgb[2], alpha)
+      surface.set_color(p.seamMat, p.rgb[0], p.rgb[1], p.rgb[2], alpha)
 
       p.activeScale = isActive ? DOCS_UNITS.SCENE_ACTIVE_SCALE : 1
     })
@@ -491,21 +536,41 @@ export const mountArchScene3d = async (
   const buildGraph = async ({ xyz, scale }: { xyz: Float32Array; scale: Float32Array }) => {
     if (disposed) return
 
-    // Shared wireframe glyph geometries — the same folder/document
-    // segment lists the three arm instances, ribboned into cross-quads
-    // (the engine draws triangles only). One upload per glyph, shared
-    // by every node in the tier.
-    const dirWire = dirWireVerts()
-    const fileWire = fileWireVerts()
-    const dirRib = segmentsToRibbons(dirWire, DOCS_UNITS.SCENE_EDGE_HALF)
-    const fileRib = segmentsToRibbons(fileWire, DOCS_UNITS.SCENE_EDGE_HALF)
+    // Shared filled glyph geometries — the same folder/document
+    // triangle soups the three arm instances. One upload per glyph,
+    // shared by every node in the tier.
+    const dirFill = dirFillVerts()
+    const fileFill = fileFillVerts()
+    const dirTri = trisToGeometry(dirFill)
+    const fileTri = trisToGeometry(fileFill)
 
-    const dirGeo = surface.upload_geometry(dirRib.pos, dirRib.nrm, dirRib.uv, dirRib.idx, false)
+    const dirGeo = surface.upload_geometry(dirTri.pos, dirTri.nrm, dirTri.uv, dirTri.idx, false)
     const fileGeo = surface.upload_geometry(
-      fileRib.pos,
-      fileRib.nrm,
-      fileRib.uv,
-      fileRib.idx,
+      fileTri.pos,
+      fileTri.nrm,
+      fileTri.uv,
+      fileTri.idx,
+      false
+    )
+
+    // Seam geometries — the detail strokes (outline, crease, rules,
+    // shelf) ribboned into cross-quads at the edge half-width, one
+    // upload per glyph shared by every node in the tier.
+    const dirSeam = segmentsToRibbons(dirSeamVerts(), DOCS_UNITS.SCENE_EDGE_HALF)
+    const fileSeam = segmentsToRibbons(fileSeamVerts(), DOCS_UNITS.SCENE_EDGE_HALF)
+
+    const dirSeamGeo = surface.upload_geometry(
+      dirSeam.pos,
+      dirSeam.nrm,
+      dirSeam.uv,
+      dirSeam.idx,
+      false
+    )
+    const fileSeamGeo = surface.upload_geometry(
+      fileSeam.pos,
+      fileSeam.nrm,
+      fileSeam.uv,
+      fileSeam.idx,
       false
     )
 
@@ -519,6 +584,14 @@ export const mountArchScene3d = async (
 
     const kindInks = probeIconInks(canvas.parentElement ?? canvas, [...kinds])
 
+    // Directory outlines wear the treeview folder's gold currentColor —
+    // probed like the kind inks so the map keeps the DOM pack's code.
+    const dirRgb = (probeFolderInk(canvas.parentElement ?? canvas) ?? ink) as [
+      number,
+      number,
+      number,
+    ]
+
     const labelJobs: Array<Promise<void>> = []
 
     placed.forEach(({ node }, i) => {
@@ -526,14 +599,29 @@ export const mountArchScene3d = async (
       const opacity = isDir ? DOCS_UNITS.SCENE_DIR_OPACITY : DOCS_UNITS.SCENE_FILE_OPACITY
       const rgb: [number, number, number] =
         isDir || node.aggregate
-          ? ink
+          ? dirRgb
           : ((kindInks.get(kindFor(node.name)) ?? ink) as [number, number, number])
 
-      const mat = surface.add_material_basic(rgb[0], rgb[1], rgb[2], opacity, SCENE3D_NONE)
+      const mat = surface.add_material_basic(
+        faceRgb[0],
+        faceRgb[1],
+        faceRgb[2],
+        opacity,
+        SCENE3D_NONE
+      )
 
-      surface.set_material_flags(mat, 0, 0, true, true)
+      // Side 2 = double — the billboarding cards must never backface-
+      // cull into a flicker silhouette at glancing orbit angles.
+      surface.set_material_flags(mat, 2, 0, true, true)
 
       const id = surface.add_mesh(graphRoot, isDir ? dirGeo : fileGeo, mat)
+
+      // Seam strokes ride the node as a child mesh — they inherit
+      // position/scale/euler/pulse with zero extra per-frame writes.
+      const seamMat = surface.add_material_basic(rgb[0], rgb[1], rgb[2], opacity, SCENE3D_NONE)
+
+      surface.set_material_flags(seamMat, 2, 0, true, true)
+      surface.add_mesh(id, isDir ? dirSeamGeo : fileSeamGeo, seamMat)
       // The synthetic portal root sits at the origin — its depth-0
       // ring position is meaningless (same override as the three arm).
       const x = i === 0 ? 0 : xyz[i * 3]
@@ -551,10 +639,11 @@ export const mountArchScene3d = async (
       pickables.push({
         node: id,
         mat,
+        seamMat,
         x,
         y,
         z,
-        radius: wireBound(isDir ? dirWire : fileWire) * gs,
+        radius: glyphBound(isDir ? dirFill : fileFill) * gs,
         depth: placed[i].depth,
         path: node.path,
         pi: i,
@@ -562,7 +651,6 @@ export const mountArchScene3d = async (
         activeScale: 1,
         rgb: [rgb[0], rgb[1], rgb[2]],
         phase: i * DOCS_UNITS.SCENE_Y_HASH,
-        spin: i * DOCS_UNITS.SCENE_SPIN_HASH,
       })
 
       if (isDir) {
@@ -600,19 +688,23 @@ export const mountArchScene3d = async (
 
     const edges = buildEdges(placed, xyz, scale)
 
-    if (edges.idx.length > 0) {
-      const geo = surface.upload_geometry(edges.pos, edges.nrm, edges.uv, edges.idx, false)
-      const emat = surface.add_material_basic(
-        ink[0],
-        ink[1],
-        ink[2],
-        DOCS_UNITS.SCENE_LINE_OPACITY,
-        SCENE3D_NONE
-      )
+    // Two link tiers: the dir skeleton draws at full line ink, leaf
+    // links at SCENE_EDGE_LEAF of it — the leaf web is the clutter bulk.
+    const mountEdges = (
+      geo: { pos: Float32Array; nrm: Float32Array; uv: Float32Array; idx: Uint32Array },
+      opacity: number
+    ): void => {
+      if (!geo.idx.length) return
+
+      const id = surface.upload_geometry(geo.pos, geo.nrm, geo.uv, geo.idx, false)
+      const emat = surface.add_material_basic(ink[0], ink[1], ink[2], opacity, SCENE3D_NONE)
 
       surface.set_material_flags(emat, 0, 0, true, true)
-      surface.add_mesh(graphRoot, geo, emat)
+      surface.add_mesh(graphRoot, id, emat)
     }
+
+    mountEdges(edges.dir, DOCS_UNITS.SCENE_LINE_OPACITY)
+    mountEdges(edges.leaf, DOCS_UNITS.SCENE_LINE_OPACITY * DOCS_UNITS.SCENE_EDGE_LEAF)
 
     await Promise.all(labelJobs)
 
@@ -699,15 +791,6 @@ export const mountArchScene3d = async (
   canvas.addEventListener(MOUSE_EVENTS.CLICK, onClick)
   canvas.addEventListener(POINTER_EVENTS.POINTERDOWN, onPointerDown, { passive: true })
 
-  // Intro settle — identical easeOutCubic window to the three arm.
-  // rootYaw tracks the live euler so focus goals stay glued to their
-  // node while the settle spin is still unwinding.
-  const introFrom = saved ? 0 : DOCS_UNITS.SCENE_INTRO_TURN
-
-  let rootYaw = 0
-
-  const t0 = performance.now()
-
   let raf = 0
 
   /**
@@ -730,26 +813,18 @@ export const mountArchScene3d = async (
     t += dt
 
     try {
-      // Location focus — retarget the rig toward the active node (goal
-      // re-based through the intro rotation) and dolly to the framing
-      // distance. setTarget/setPose snap, so lerped per-frame writes
-      // are the glide itself.
+      // Location focus — retarget the rig toward the active node and
+      // dolly to the framing distance. The graph itself never rotates,
+      // so the goal is the node's raw world position. setTarget/setPose
+      // snap, so lerped per-frame writes are the glide itself.
       if (focus.on) {
         const k = DOCS_UNITS.SCENE_FOCUS_DAMP
 
-        const cy = Math.cos(rootYaw)
-
-        const sy = Math.sin(rootYaw)
-
-        const gx = focus.x * cy + focus.z * sy
-
-        const gz = focus.z * cy - focus.x * sy
-
-        const ntx = ctl.tx + (gx - ctl.tx) * k
+        const ntx = ctl.tx + (focus.x - ctl.tx) * k
 
         const nty = ctl.ty + (focus.y - ctl.ty) * k
 
-        const ntz = ctl.tz + (gz - ctl.tz) * k
+        const ntz = ctl.tz + (focus.z - ctl.tz) * k
 
         ctl.setTarget(ntx, nty, ntz)
 
@@ -758,7 +833,7 @@ export const mountArchScene3d = async (
         ctl.setPose(nd, ctl.yaw, ctl.pitch)
 
         if (
-          Math.abs(gx - ntx) + Math.abs(focus.y - nty) + Math.abs(gz - ntz) <
+          Math.abs(focus.x - ntx) + Math.abs(focus.y - nty) + Math.abs(focus.z - ntz) <
             DOCS_UNITS.SCENE_FOCUS_EPS &&
           Math.abs(focus.dist - nd) < DOCS_UNITS.SCENE_FOCUS_EPS
         ) {
@@ -770,20 +845,14 @@ export const mountArchScene3d = async (
         surface.set_orbit(ctl.tx, ctl.ty, ctl.tz, ctl.distance, ctl.yaw, ctl.pitch)
       }
 
-      if (introFrom) {
-        const k = Math.min(1, (now - t0) / DOCS_UNITS.SCENE_INTRO_MS)
-
-        rootYaw = introFrom * Math.pow(1 - k, 3)
-
-        surface.set_euler(graphRoot, 0, rootYaw, 0)
-      }
-
-      // Node pulse + float + self-yaw — the reference's per-node motion.
-      // The three arm runs these in-shader; the engine has no instanced
-      // attribute path, so each pickable gets scale/position/euler
-      // writes in the same loop (edge ribbons stay anchored — the
-      // bobbed endpoints drift ±BOB_AMP off the wire ends, an accepted
-      // divergence on this debug-gated arm).
+      // Node pulse + float + camera-facing yaw — the three arm runs the
+      // same motion in-shader as a full billboard; the engine has no
+      // instanced attribute path, so each pickable gets scale/position/
+      // yaw writes in the same loop. The yaw is the rig's camera
+      // azimuth — cards stand upright facing the viewer, never
+      // spinning (edge ribbons stay anchored — the bobbed endpoints
+      // drift ±BOB_AMP off the wire ends, an accepted divergence on
+      // this debug-gated arm).
       for (let i = 0; i < pickables.length; i++) {
         const p = pickables[i]
         const s =
@@ -797,20 +866,24 @@ export const mountArchScene3d = async (
           p.y + Math.sin(t * DOCS_UNITS.SCENE_BOB_SPEED + p.phase) * DOCS_UNITS.SCENE_BOB_AMP,
           p.z
         )
-        surface.set_euler(p.node, 0, t * DOCS_UNITS.SCENE_NODE_SPIN + p.spin, 0)
+        surface.set_euler(p.node, 0, ctl.yaw, 0)
       }
 
       // Zoom-reveal labels — dirty-gated: alpha only writes when the
       // bucket fade actually moved (hidden labels write once, ever).
+      // Thresholds are fractions of the full-graph camera distance so
+      // names stay legible from the overview inward (same contract as
+      // the three arm).
       const d = ctl.getDistance()
 
       for (let i = 0; i < labels.length; i++) {
         const l = labels[i]
-        const reveal = Math.max(
-          DOCS_UNITS.LABEL_REVEAL_MIN,
-          DOCS_UNITS.LABEL_REVEAL_BASE - l.depth * DOCS_UNITS.LABEL_DEPTH_STEP
-        )
-        const a = Math.max(0, Math.min(1, (reveal - d) / DOCS_UNITS.LABEL_FADE))
+        const reveal =
+          Math.max(
+            DOCS_UNITS.LABEL_REVEAL_MIN,
+            DOCS_UNITS.LABEL_REVEAL_BASE - l.depth * DOCS_UNITS.LABEL_DEPTH_STEP
+          ) * camDist
+        const a = Math.max(0, Math.min(1, (reveal - d) / (DOCS_UNITS.LABEL_FADE * camDist)))
 
         if (a !== l.a) {
           surface.set_color(l.mat, ink[0], ink[1], ink[2], a)

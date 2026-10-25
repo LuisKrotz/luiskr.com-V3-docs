@@ -230,7 +230,7 @@ jest.unstable_mockModule('three', () => {
     },
     MeshStandardMaterial: Disposable,
     BufferGeometry,
-    // Instanced wireframe geometry — the glyph tiers drive instanced
+    // Instanced glyph geometry — the filled tiers drive instanced
     // draws through instanceCount + instanced attribute streams.
     InstancedBufferGeometry: class extends BufferGeometry {
       constructor() {
@@ -245,8 +245,8 @@ jest.unstable_mockModule('three', () => {
         this.itemSize = itemSize
       }
     },
-    // LineSegments keeps its geometry + material — the glyph tier is
-    // asserted through them (wire verts, instanced attrs, shader patch).
+    // LineSegments keeps its geometry + material — the edge fan is
+    // asserted through them (vertex attrs, shader patch).
     LineSegments: class extends Mesh {
       constructor(geometry, material) {
         super(geometry, material)
@@ -333,6 +333,18 @@ const ROOTS = [
 ]
 
 const flush = (ms = 40) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * The two instanced glyph FILL tiers — dir first, file second, in
+ * scene-add order. Their InstancedBufferGeometry carries a positive
+ * instanceCount and they are Meshes; the seam strokes share the count
+ * but are LineSegments, pick spheres are SphereGeometry, the edge fan
+ * a plain BufferGeometry and labels are sprites.
+ */
+const glyphTiers = (Scene) =>
+  Scene.lastInstance.children.filter(
+    (c) => (c.geometry?.instanceCount ?? 0) > 0 && !c.isLineSegments
+  )
 
 /**
  * Reads the instanced alpha + active flag for a manifest path. Nodes
@@ -672,7 +684,7 @@ describe('docs architecture scene', () => {
     canvas.remove()
   })
 
-  test('first gesture stops autoRotate and persists the camera pose', () => {
+  test('the map never self-rotates; a gesture persists the camera pose', () => {
     const canvas = document.createElement(HTML_TAGS.CANVAS)
 
     document.body.appendChild(canvas)
@@ -681,18 +693,16 @@ describe('docs architecture scene', () => {
 
     const controls = OrbitControls.lastInstance
 
-    expect(controls.autoRotate).toBe(true)
-
-    controls.dispatch('start')
-
+    // No autorotate, no intro turn — orbiting is a user gesture only.
     expect(controls.autoRotate).toBe(false)
 
+    controls.dispatch('start')
     controls.dispatch('end')
 
     const saved = JSON.parse(sessionStorage.getItem(CACHE_STORAGE_KEYS.DOCS_SCENE_STATE))
 
-    expect(saved.off).toBe(true)
     expect(saved.p.length).toBe(3)
+    expect(saved.t.length).toBe(3)
 
     handle.destroy()
     canvas.remove()
@@ -714,12 +724,13 @@ describe('docs architecture scene', () => {
 
     handle.destroy()
 
-    // Malformed stored state falls back to defaults instead of throwing.
+    // Malformed stored state falls back to defaults instead of throwing
+    // — the map still never self-rotates.
     sessionStorage.setItem(CACHE_STORAGE_KEYS.DOCS_SCENE_STATE, 'not json')
 
     const handle2 = mountArchScene(canvas, ROOTS, jest.fn())
 
-    expect(OrbitControls.lastInstance.autoRotate).toBe(true)
+    expect(OrbitControls.lastInstance.autoRotate).toBe(false)
 
     handle2.destroy()
     canvas.remove()
@@ -850,7 +861,7 @@ describe('docs architecture scene', () => {
 
     const handle = mountArchScene(canvas, ROOTS, jest.fn())
 
-    expect(OrbitControls.lastInstance.autoRotate).toBe(true)
+    expect(OrbitControls.lastInstance.autoRotate).toBe(false)
 
     // Gesture → saveCamState hits the same storage-undefined guard.
     OrbitControls.lastInstance.dispatch('start')
@@ -874,7 +885,7 @@ describe('docs architecture scene', () => {
 
     const handle = mountArchScene(canvas, ROOTS, jest.fn())
 
-    expect(OrbitControls.lastInstance.autoRotate).toBe(true)
+    expect(OrbitControls.lastInstance.autoRotate).toBe(false)
 
     handle.destroy()
     canvas.remove()
@@ -1034,11 +1045,11 @@ describe('docs architecture scene', () => {
       return 1
     }
 
-    // A saved pose skips the intro turn — the graph never rotates, so
-    // the focus goal is the raw node position (deterministic assert).
+    // The graph never self-rotates, so the focus goal is the node's
+    // raw world position (deterministic assert).
     sessionStorage.setItem(
       CACHE_STORAGE_KEYS.DOCS_SCENE_STATE,
-      JSON.stringify({ p: [0, 40, 50], t: [0, 0, 0], off: false })
+      JSON.stringify({ p: [0, 40, 50], t: [0, 0, 0] })
     )
 
     const canvas = document.createElement(HTML_TAGS.CANVAS)
@@ -1111,7 +1122,7 @@ describe('docs architecture scene', () => {
     // `|| 1` length guard keeps the dolly scale finite.
     sessionStorage.setItem(
       CACHE_STORAGE_KEYS.DOCS_SCENE_STATE,
-      JSON.stringify({ p: [0, 0, 0], t: [0, 0, 0], off: false })
+      JSON.stringify({ p: [0, 0, 0], t: [0, 0, 0] })
     )
 
     const canvas = document.createElement(HTML_TAGS.CANVAS)
@@ -1142,7 +1153,7 @@ describe('docs architecture scene', () => {
     canvas.remove()
   })
 
-  test('a fresh mount eases the graph in via the intro turn; a saved pose skips it', async () => {
+  test('the graph rests unrotated on fresh and restored mounts alike', async () => {
     const { Scene } = await import('three')
 
     const canvas = document.createElement(HTML_TAGS.CANVAS)
@@ -1153,14 +1164,14 @@ describe('docs architecture scene', () => {
 
     await flush()
 
-    // ~50ms into a multi-second ease — the graph is still rotated in.
-    expect(Math.abs(Scene.lastInstance.rotation.y)).toBeGreaterThan(0.1)
+    // No intro turn, no autorotate — the scene root never leaves 0.
+    expect(Scene.lastInstance.rotation.y).toBe(0)
 
     handle.destroy()
 
     sessionStorage.setItem(
       CACHE_STORAGE_KEYS.DOCS_SCENE_STATE,
-      JSON.stringify({ p: [1, 2, 3], t: [4, 5, 6], off: false })
+      JSON.stringify({ p: [1, 2, 3], t: [4, 5, 6] })
     )
 
     const handle2 = mountArchScene(canvas, ROOTS, jest.fn())
@@ -1256,7 +1267,7 @@ describe('docs architecture scene', () => {
     canvas.remove()
   })
 
-  test('the glyph-material shader patch injects spin + bob + instanced ink', async () => {
+  test('the glyph-material shader patch injects billboard + bob + instanced ink', async () => {
     const { Scene } = await import('three')
 
     const canvas = document.createElement(HTML_TAGS.CANVAS)
@@ -1267,7 +1278,7 @@ describe('docs architecture scene', () => {
 
     await flush()
 
-    const glyph = Scene.lastInstance.children.find((c) => c.isLineSegments)
+    const glyph = glyphTiers(Scene)[0]
 
     // The mock renderer never compiles programs — invoke the patch
     // hook the way three would at first render.
@@ -1278,7 +1289,7 @@ describe('docs architecture scene', () => {
     expect(shader.uniforms.uTime.value).toBeGreaterThanOrEqual(0)
     expect(shader.vertexShader).toContain(DOCS_STRINGS.SCENE_ATTR_ALPHA)
     expect(shader.vertexShader).toContain(DOCS_STRINGS.SCENE_ATTR_OFFSET)
-    expect(shader.vertexShader).toContain(DOCS_STRINGS.SCENE_ATTR_SPIN)
+    expect(shader.vertexShader).toContain(DOCS_STRINGS.SCENE_ATTR_SCALE)
     expect(shader.fragmentShader).toContain('vColor')
 
     handle.destroy()
@@ -1298,8 +1309,9 @@ describe('docs architecture scene', () => {
 
     const lines = Scene.lastInstance.children.filter((c) => c.isLineSegments)
 
-    // Tiers first (dir + file glyphs), edge fan last — it owns the
-    // per-vertex aPhase attribute rather than instanced streams.
+    // The edge fan is the only LineSegments — the glyph tiers are
+    // instanced Mesh draws now. It owns the per-vertex aPhase attribute
+    // rather than instanced streams.
     const edges = lines[lines.length - 1]
 
     expect(edges.geometry.getAttribute(DOCS_STRINGS.SCENE_ATTR_PHASE)).toBeTruthy()
@@ -1711,11 +1723,14 @@ describe('docs architecture scene', () => {
 
       await flush()
 
-      const glyphs = Scene.lastInstance.children.filter((c) => c.isLineSegments)
-
-      // The file glyph is the second instanced tier — its aColor rows
-      // must hold the probed ink ([247,223,30]/255), not the accent.
-      const cols = glyphs[1].geometry.getAttribute(DOCS_STRINGS.SCENE_ATTR_COLOR).array
+      // The seam tiers are the instanced LineSegments — seams carry the
+      // per-kind ink (fills draw the page-bg card body). The file seam
+      // is the second instanced seam tier — its aColor rows must hold
+      // the probed ink ([247,223,30]/255), not the accent.
+      const seams = Scene.lastInstance.children.filter(
+        (c) => c.isLineSegments && (c.geometry?.instanceCount ?? 0) > 0
+      )
+      const cols = seams[1].geometry.getAttribute(DOCS_STRINGS.SCENE_ATTR_COLOR).array
 
       expect(cols[0]).toBeCloseTo(247 / 255, 2)
       expect(cols[1]).toBeCloseTo(223 / 255, 2)

@@ -232,7 +232,7 @@
   // / Source / Reports) read slightly heavier than their members so the
   // top level scans as a divider, not just another folder.
   &-tree-item--group {
-    font-weight: 300;
+    font-weight: calc(300 + var(--fw-lift));
     letter-spacing: to-rem(3);
     text-transform: uppercase;
     opacity: 1;
@@ -255,6 +255,12 @@
     --icon-ink: var(--text-secondary);
 
     // The icon pack — each filetype's own ink, all themed vars.
+    // --folder pins --icon-ink to the folder's gold currentColor so
+    // shared pack parts (the sheen sweep) carry the folder ink too.
+    &--folder {
+      --icon-ink: currentColor;
+    }
+
     &--ts {
       --icon-ink: var(--color-blue-raw);
     }
@@ -340,7 +346,7 @@
       // The ttf 'A' sets light (the sheet's thin serif-like letter),
       // not bold like the other wordmarks.
       .#{$_B_DOCS}-icon-text {
-        font-weight: 300;
+        font-weight: calc(300 + var(--fw-lift));
       }
     }
     &--wasm {
@@ -431,17 +437,19 @@
   }
 
   // Folder wireframe — the reference folders are single-stroke
-  // outlines: the body gets a ≤5% wash, the swung-forward flap ≤8%.
+  // outlines over OPAQUE page-colored faces: the solid interior is
+  // what occludes the paper sheets' bottoms behind the back plate and
+  // the swung-forward flap (the reference's pages-inside read).
   &-tree-icon {
     &-body {
-      fill: color-mix(in srgb, currentColor 5%, transparent);
+      fill: var(--bg-primary);
       stroke: currentColor;
       stroke-width: 0.6;
       stroke-linejoin: round;
     }
 
     &-flap {
-      fill: color-mix(in srgb, currentColor 8%, transparent);
+      fill: var(--bg-primary);
       stroke: currentColor;
       stroke-width: 0.6;
       stroke-linejoin: round;
@@ -480,7 +488,7 @@
     fill: var(--icon-ink);
     stroke: none;
     font-size: 6px;
-    font-weight: 700;
+    font-weight: calc(700 + var(--fw-lift));
     font-family: var(--font-primary);
     letter-spacing: 0.02em;
   }
@@ -488,6 +496,18 @@
   &-icon-fill {
     fill: var(--icon-ink);
     stroke: none;
+  }
+
+  // Rim-light glint — the reference pack's traveling shine: a short
+  // bright comet segment orbiting the icon's outline stroke, inked as
+  // the icon's own --icon-ink lifted toward white (kind color for
+  // files, folder gold for dirs via the --folder pin).
+  &-icon-glint {
+    fill: none;
+    stroke: color-mix(in srgb, var(--icon-ink) 40%, var(--color-white-raw));
+    stroke-width: 0.9;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
   // Details sitting ON a filled tile (TS/JS letterforms) — paper ink so
@@ -500,33 +520,29 @@
     stroke-linecap: round;
   }
 
-  // Folder paper sheets — thin transparent outlines like the reference
-  // pack (the sheet interior stays see-through; only the rim draws).
-  // Closed folders use them as plain gold page tops; the open folder's
-  // fanned sheets each take a different filetype ink via --N tones.
+  // Folder paper sheets — the reference's solid page faces: opaque
+  // page-colored interiors so nested sheets occlude each other and the
+  // flap hides their bottoms; only the rim strokes in the folder ink.
+  // The open folder's fanned sheets each take a filetype ink via --N.
   &-tree-paper {
-    fill: color-mix(in srgb, var(--bg-primary) 30%, transparent);
+    fill: var(--bg-primary);
     stroke: currentColor;
     stroke-width: 0.45;
-    opacity: 0.9;
+    opacity: 0.95;
 
     &--0 {
-      fill: color-mix(in srgb, var(--cov-low-strong) 8%, transparent);
       stroke: var(--cov-low-strong);
     }
 
     &--1 {
-      fill: color-mix(in srgb, var(--color-blue-raw) 8%, transparent);
       stroke: var(--color-blue-raw);
     }
 
     &--2 {
-      fill: color-mix(in srgb, var(--cov-high-strong) 8%, transparent);
       stroke: var(--cov-high-strong);
     }
 
     &--3 {
-      fill: color-mix(in srgb, var(--cov-syn-lit) 8%, transparent);
       stroke: var(--cov-syn-lit);
     }
   }

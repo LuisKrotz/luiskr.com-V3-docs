@@ -31,7 +31,7 @@ const docsRoute = (docsPath = CHAR_STRINGS.EMPTY) => ({
 
 const flush = () => new Promise((r) => setTimeout(r, 0))
 
-describe('ViewDocs — architecture map zoom + pause wiring', () => {
+describe('ViewDocs — file cloud zoom + pause wiring', () => {
   let view
   let cleanup
   let origRoute

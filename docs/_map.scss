@@ -46,7 +46,9 @@ $_B_EXPAND_CLOSE_FALLBACK: 'expand-modal-close-bar-fallback';
 
   &-map-head {
     display: flex;
-    align-items: flex-start;
+    // Stretch so the zoom trigger tracks the scene-hint chip's box
+    // exactly — the pair reads as one aligned row of equal heights.
+    align-items: stretch;
     justify-content: space-between;
     gap: to-rem($space-xs);
   }
@@ -60,32 +62,62 @@ $_B_EXPAND_CLOSE_FALLBACK: 'expand-modal-close-bar-fallback';
     overflow: hidden;
   }
 
-  // Zoom trigger — the project's hairline-corner square button.
+  // Zoom trigger — circular icon button matching the dialog's round
+  // pref-close control it pairs with: a translucent ink disc, no
+  // frame — the ⤢ glyph carries the affordance. The stretch +
+  // aspect-ratio pair keeps it a circle at exactly the scene-hint
+  // chip's height (never under the $space-2xl floor the chip also
+  // carries).
   &-map-zoom {
     @extend %RESETBTN;
 
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: to-rem($space-2xl);
-    height: to-rem($space-2xl);
+    min-width: to-rem($space-2xl);
+    min-height: to-rem($space-2xl);
+    aspect-ratio: 1 / 1;
     flex: 0 0 auto;
     font-family: var(--font-mono);
     font-size: to-rem($space-lg);
     line-height: 1;
-    color: inherit;
-    background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
-    border: to-rem($space-3xs) solid currentColor;
-    border-radius: var(--radius-2xs);
+    // The carousel-control look — obsidian-glass disc + accent ring +
+    // light glyph; same chrome as the prev/next canvas buttons, only
+    // the icon differs.
+    color: var(--color-white-raw);
+    background: color-mix(in srgb, var(--bg-darkest) 88%, transparent);
+    box-shadow:
+      inset 0 0 0 to-rem($space-3xs) color-mix(in srgb, var(--color-accent) 28%, transparent),
+      0 0 to-rem($space-xs) color-mix(in srgb, var(--color-accent) 16%, transparent);
+    border-radius: var(--radius-round);
     cursor: pointer;
-    transition: opacity 0.2s ease;
+    transition:
+      background 0.2s ease,
+      box-shadow 0.25s ease;
 
     &:hover,
     &:focus-visible {
-      opacity: 0.7;
+      background: color-mix(in srgb, var(--bg-darkest) 82%, var(--color-white-raw) 8%);
+      box-shadow:
+        inset 0 0 0 to-rem($space-3xs) color-mix(in srgb, var(--color-accent) 60%, transparent),
+        0 0 to-rem($space-sm) color-mix(in srgb, var(--color-accent) 35%, transparent);
       outline: to-rem($space-3xs) solid var(--focus-ring);
       outline-offset: to-rem($space-3xs);
     }
+
+    // Inside-icon animation — the close-X precedent: the glyph scales on
+    // the same organic ease while the disc brightens behind it.
+    &:hover .#{$_B_DOCS}-map-zoom-icon,
+    &:focus-visible .#{$_B_DOCS}-map-zoom-icon {
+      transform: scale(1.2);
+    }
+  }
+
+  // The ⤢ glyph — a real node so hover can transform it (text nodes
+  // take no transform); inline-block is the transform box.
+  &-map-zoom-icon {
+    display: inline-block;
+    transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
   }
 
   // Circular close button — the pref-close contract, self-contained
@@ -103,8 +135,11 @@ $_B_EXPAND_CLOSE_FALLBACK: 'expand-modal-close-bar-fallback';
     width: to-rem($space-2xl);
     height: to-rem($space-2xl);
     border-radius: var(--radius-round);
-    color: inherit;
-    background: color-mix(in srgb, currentColor 10%, transparent);
+    // Project default recipe verbatim — _expand-modal's pref-close:
+    // --border-color glass, white X fallback, --border-item-hover hover.
+    // The liquid CloseButtonWebGL canvas paints over it when mounted.
+    color: var(--color-white-raw);
+    background: var(--border-color);
     cursor: pointer;
     transition:
       background 0.2s ease,
@@ -160,9 +195,7 @@ $_B_EXPAND_CLOSE_FALLBACK: 'expand-modal-close-bar-fallback';
 
     &:hover,
     &:focus-visible {
-      background: color-mix(in srgb, currentColor 18%, transparent);
-      outline: to-rem($space-3xs) solid var(--focus-ring);
-      outline-offset: to-rem($space-3xs);
+      background: var(--border-item-hover);
 
       .#{$_B_EXPAND_CLOSE_FALLBACK}::before {
         transform: translate(-50%, -50%) rotate(135deg);
@@ -226,7 +259,7 @@ $_B_EXPAND_CLOSE_FALLBACK: 'expand-modal-close-bar-fallback';
 
     align-self: center;
     color: var(--text-muted);
-    font-weight: 700;
+    font-weight: calc(700 + var(--fw-lift));
     font-size: to-rem($space-md);
     text-transform: uppercase;
     letter-spacing: to-rem(2);

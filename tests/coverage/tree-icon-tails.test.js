@@ -42,10 +42,11 @@ describe('treeIcon — node-shape arms', () => {
 
     expect(svg.querySelector(FLAP)).toBeTruthy()
     expect(svg.querySelectorAll(PAPER).length).toBe(1)
-    // The lone (front) sheet leans out with the slow bob animation —
-    // plain .docs-tree-paper now, the reference pack dropped the tone fan.
+    // The lone (front) sheet leans out with the slow bob animation and
+    // wears the first paper tone — the reference pack's open folder fans
+    // differently-inked sheets out of the mouth.
     expect(svg.querySelector(`g animateTransform`)).toBeTruthy()
-    expect(svg.querySelector(`.${DOCS_CLASSES.DOCS_TREE_PAPER_TONES[0]}`)).toBeFalsy()
+    expect(svg.querySelector(`.${DOCS_CLASSES.DOCS_TREE_PAPER_TONES[0]}`)).toBeTruthy()
   })
 
   test('a closed dir with many children caps the peeking page tops', () => {
@@ -58,7 +59,7 @@ describe('treeIcon — node-shape arms', () => {
     const svg = treeIcon({ type: 'dir', name: 'many', path: 'docs/many', children }, false)
 
     // 7 children → capped stack (TREE_SHEET_CAP_CLOSED), still no flap.
-    expect(svg.querySelectorAll(PAPER).length).toBe(3)
+    expect(svg.querySelectorAll(PAPER).length).toBe(4)
     expect(svg.querySelector(FLAP)).toBeFalsy()
   })
 
@@ -71,9 +72,9 @@ describe('treeIcon — node-shape arms', () => {
 
     const svg = treeIcon({ type: 'dir', name: 'wide', path: 'docs/wide', children }, true)
 
-    // 6 children → capped lean (TREE_SHEET_CAP_OPEN = 2) — the reference
-    // pack's open folder shows two restrained pages, not a fan.
-    expect(svg.querySelectorAll(PAPER).length).toBe(2)
+    // 6 children → capped fan (TREE_SHEET_CAP_OPEN = 4) — the reference
+    // pack's open folder shows a short stack of toned sheets.
+    expect(svg.querySelectorAll(PAPER).length).toBe(4)
   })
 
   test('a middling dir shows a mid-height stack', () => {

@@ -46,9 +46,15 @@
   }
 
   // Scene caption — the small chip inside the map head naming the
-  // surface ("architecture map") so first-time viewers know the column
-  // is the interactive folder navigator, not decoration.
+  // surface ("interactive file cloud") so first-time viewers know the
+  // column is the interactive folder navigator, not decoration.
   &-scene-hint {
+    display: inline-flex;
+    align-items: center;
+    // Floor the chip at the round control's size — the map-head pair
+    // (chip + zoom trigger) always shares one height.
+    min-height: to-rem($space-2xl);
+    box-sizing: border-box;
     padding: to-rem($space-3xs) to-rem($space-sm);
     font-size: to-rem($space-md);
     letter-spacing: 0.08em;

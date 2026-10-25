@@ -36,8 +36,9 @@ describe('generated folder artwork', () => {
     )
 
     expect(svg.querySelector(FLAP)).toBeTruthy()
-    // The flap carries the one-shot swing-in animation.
-    expect(svg.querySelector(`${FLAP} animateTransform`)).toBeTruthy()
+    // The flap is a static trapezoid — the reference pack carries no
+    // open/close rotation, only the shared rim-light glint orbits it.
+    expect(svg.querySelector(`${FLAP} animateTransform`)).toBeFalsy()
     expect(svg.querySelector(FACE)).toBeFalsy()
   })
 

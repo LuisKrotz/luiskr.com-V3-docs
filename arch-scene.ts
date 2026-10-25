@@ -2,16 +2,19 @@
  * @file docs/arch-scene.ts
  * @description Interactive three.js visualization of the docs manifest —
  * the architecture/org structure rendered as a 3D radial tree: each
- * directory is a node on its depth ring, edges draw parent→child, nodes
- * pulse on a slow organic drift and click-to-pick navigates the portal.
- * Directory names ride on sprite labels that fade in as the camera zooms
- * closer, so the viewer can tell which ring/folder it is inside.
+ * directory is a node on its depth ring, edges draw parent→child, glyph
+ * cards billboard to face the camera (no autorotate, no per-node spin —
+ * the map only moves when the viewer drags it), nodes pulse/bob on a
+ * slow organic drift and click-to-pick navigates the portal.
+ * Directory names ride on sprite labels that reveal at a fraction of
+ * the full-graph camera distance, so names stay readable from the
+ * overview framing inward.
  *
  * WebGL context acquisition goes through `webglContext()` (the project
  * choke point) and is handed to three's WebGLRenderer, so the
  * `?debug=webGLMode:fallback` surface and pool hygiene stay authoritative.
  * All per-frame math lives on the GPU/three transforms — the rAF tick only
- * sets uniforms/rotation, per the compute-placement rule.
+ * feeds the shared time uniform, per the compute-placement rule.
  *
  * Node-position batch math dispatches through `wasmPool` (the
  * DOCS_SCENE_LAYOUT worker op); when the pool is unavailable the identical
@@ -91,6 +94,14 @@ interface LabelRef {
   a: number
 }
 
+/** One rendered node tier — the solid fill, the seam strokes that keep
+ *  the icon's form legible, and the invisible pick spheres. */
+interface GlyphTier {
+  fill: THREE.Mesh
+  seam: THREE.LineSegments
+  pick: THREE.InstancedMesh
+}
+
 /**
  * three.js GLSL anchors the instanced-node materials patch — chunk-include
  * names are the stable seam inside three's generated programs.
@@ -116,21 +127,21 @@ const ATTR_A_ACTIVE = DOCS_STRINGS.SCENE_ATTR_ACTIVE
 const ATTR_A_OFFSET = DOCS_STRINGS.SCENE_ATTR_OFFSET
 const ATTR_A_COLOR = DOCS_STRINGS.SCENE_ATTR_COLOR
 const ATTR_A_PHASE = DOCS_STRINGS.SCENE_ATTR_PHASE
-const ATTR_A_SPIN = DOCS_STRINGS.SCENE_ATTR_SPIN
 const ATTR_A_SCALE = DOCS_STRINGS.SCENE_ATTR_SCALE
 
 /**
- * Wireframe-glyph shader contract — the procedural-directory reference's
- * per-node motion and per-kind ink run entirely in the vertex/fragment
- * stages so ~7k glyph instances cost one draw call per tier and ZERO
- * per-frame CPU writes:
+ * Filled-glyph shader contract — the per-node placement and per-kind
+ * ink run entirely in the vertex/fragment stages so ~7k glyph instances
+ * cost one draw call per tier and ZERO per-frame CPU writes:
  *
- *   p      = rotY(uTime·SPIN + aSpin) · position        — node self-yaw
- *   p     *= aScale                                     — orbit-proportional glyph
- *   p     *= (1 + sin(uTime·PULSE + i·0.7)·AMP)         — ambient pulse
- *          · (1 + aActive·(SCENE_ACTIVE_SCALE − 1))     — active pop
+ *   p      = camRight·x + camUp·y + camBack·z               — billboard:
+ *            local card axes ride the camera's world axes (viewMatrix
+ *            rows), so every icon faces the viewer and never spins
+ *   p     *= aScale                                        — orbit-proportional glyph
+ *   p     *= (1 + sin(uTime·PULSE + i·0.7)·AMP)            — ambient pulse
+ *          · (1 + aActive·(SCENE_ACTIVE_SCALE − 1))        — active pop
  *   off    = aOffset + (0, sin(uTime·BOB + aPhase)·BAMP, 0)
- *   result = p + off                                   — bob + place
+ *   result = p + off                                      — bob + place
  *
  * `aColor` carries the file's icon-pack ink (dir accent for folders and
  * +N aggregates); `aAlpha`/`aActive` are the highlight-pass streams —
@@ -141,7 +152,6 @@ const glyphVertexPreamble =
   `attribute vec3 ${ATTR_A_OFFSET};\n` +
   `attribute vec3 ${ATTR_A_COLOR};\n` +
   `attribute float ${ATTR_A_PHASE};\n` +
-  `attribute float ${ATTR_A_SPIN};\n` +
   `attribute float ${ATTR_A_ALPHA};\n` +
   `attribute float ${ATTR_A_ACTIVE};\n` +
   `attribute float ${ATTR_A_SCALE};\n` +
@@ -149,9 +159,12 @@ const glyphVertexPreamble =
 
 const glyphVertexTransform =
   `${GLSL_BEGIN_VERTEX}\n` +
-  `float _sa = uTime * ${DOCS_UNITS.SCENE_NODE_SPIN} + ${ATTR_A_SPIN};\n` +
-  `float _sc = cos(_sa), _ss = sin(_sa);\n` +
-  `vec3 _p = vec3(transformed.x * _sc - transformed.z * _ss, transformed.y, transformed.x * _ss + transformed.z * _sc);\n` +
+  // The tier meshes sit unrotated at the scene root, so local space IS
+  // world space: rebuilding the card on the camera basis billboards it.
+  `vec3 _rt = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);\n` +
+  `vec3 _up = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);\n` +
+  `vec3 _fw = vec3(viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]);\n` +
+  `vec3 _p = _rt * transformed.x + _up * transformed.y + _fw * transformed.z;\n` +
   `_p *= ${ATTR_A_SCALE};\n` +
   `_p *= (1.0 + sin(uTime * ${DOCS_UNITS.SCENE_PULSE_SPEED} + float(gl_InstanceID) * 0.7) * ${DOCS_UNITS.SCENE_PULSE_AMP}) * (1.0 + ${ATTR_A_ACTIVE} * ${DOCS_UNITS.SCENE_ACTIVE_SCALE - 1.0});\n` +
   `vec3 _off = ${ATTR_A_OFFSET};\n` +
@@ -181,7 +194,7 @@ const edgeVertexBob =
  * in-shader: `uTime` is the shared clock, `aAlpha`/`aActive` are the
  * instanced attribute streams the highlight pass rewrites on demand.
  */
-const patchGlyphMaterial = (mat: THREE.LineBasicMaterial, clock: { value: number }): void => {
+const patchGlyphMaterial = (mat: THREE.Material, clock: { value: number }): void => {
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = clock
 
@@ -315,7 +328,7 @@ const clusterRadii = (parents: number[]): { cluster: Float64Array } => {
   // solved for R — conservative for the Fibonacci sphere (whose uniform
   // spread beats the ring's worst-case chord). It sizes orbits for the
   // LARGEST glyph (SCENE_GLYPH_MAX), so rendered siblings always keep
-  // ≥MIN_SEP clear space between wireframe edges. Unlike subtree-extent
+  // ≥MIN_SEP clear space between glyph faces. Unlike subtree-extent
   // packing this is a single forward pass: sibling clouds may
   // interpenetrate in depth (the reference accepts this — only icons
   // need clear space), which keeps the radius geometric instead of
@@ -345,7 +358,7 @@ const clusterRadii = (parents: number[]): { cluster: Float64Array } => {
  * (phi = acos(1 − 2·(s+0.5)/n), theta = s·golden-angle) at the
  * parent's cluster radius. Cluster radii come from `clusterRadii` —
  * the reference's shrink-ratio orbits with a sibling-glyph clearance
- * floor, so icons keep ≥SCENE_MIN_SEP of wireframe clear space while
+ * floor, so icons keep ≥SCENE_MIN_SEP of glyph-face clear space while
  * subtree clouds compress geometrically (the hairball fix: strict
  * non-interpenetration grows exponentially and is unreadable past a
  * few hundred nodes).
@@ -493,117 +506,277 @@ export const computePositions = async (
 }
 
 /**
- * Wireframe folder glyph — the procedural-directory reference shape:
- * a front panel (top edge slightly lower, the open-mouth read), a
- * taller back panel, a tab on the back's top-left, and the depth
- * connectors that make it read as a 3D box from any orbit angle.
- * Pure vertex math — no textures, no imported geometry. Scaled to
- * SCENE_DIR_RADIUS. Exported: the scene3d arm ribbons the same verts.
- * @returns Flat xyz pairs — segment list for LINES drawing.
+ * Pushes one triangle (3 verts = 9 floats) onto a flat soup list.
+ * @param v The accumulating vert list.
+ * @param a First vertex xyz.
+ * @param b Second vertex xyz.
+ * @param c Third vertex xyz.
  */
-export const dirWireVerts = (): Float32Array => {
-  const s = DOCS_UNITS.SCENE_DIR_RADIUS
-  const w = s
-  const h = s * 0.75
-  const d = s * 0.15
-  const tabW = s * 0.6
-  const tabH = s * 0.2
-
-  const v: number[] = []
-  const L = (a: number[], b: number[]): void => {
-    v.push(a[0], a[1], a[2], b[0], b[1], b[2])
-  }
-
-  const fBL = [-w, -h, d]
-  const fBR = [w, -h, d]
-  const fTR = [w, h - s * 0.2, d]
-  const fTL = [-w, h - s * 0.2, d]
-
-  const bBL = [-w, -h, -d]
-  const bBR = [w, -h, -d]
-  const bTR = [w, h, -d]
-  const bTL = [-w, h, -d]
-
-  const tTL = [-w, h + tabH, -d]
-  const tTR = [-w + tabW, h + tabH, -d]
-  const tBR = [-w + tabW + s * 0.1, h, -d]
-
-  // Front panel rectangle.
-  L(fBL, fBR)
-  L(fBR, fTR)
-  L(fTR, fTL)
-  L(fTL, fBL)
-  // Back panel (bottom, right, left — the top edge is the tab's line).
-  L(bBL, bBR)
-  L(bBR, bTR)
-  L(bBL, bTL)
-  // Tab up and over.
-  L(bTL, tTL)
-  L(tTL, tTR)
-  L(tTR, tBR)
-  L(tBR, bTR)
-  // Depth connectors front→back.
-  L(fBL, bBL)
-  L(fBR, bBR)
-  L(fTR, bTR)
-  L(fTL, bTL)
-
-  return new Float32Array(v)
+const pushTri = (v: number[], a: number[], b: number[], c: number[]): void => {
+  v.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2])
 }
 
 /**
- * Wireframe document glyph — folded-corner page outline + inner fold
- * diagonal + three text-rule lines (the reference file shape). Scaled
- * to SCENE_FILE_RADIUS·1.3 so leaf glyphs read smaller than folders
- * (the container/item size ratio of the reference). Exported: the
- * scene3d arm ribbons the same verts.
- * @returns Flat xyz pairs — segment list for LINES drawing.
+ * Pushes one quad as two triangles — vertices arrive in perimeter
+ * order a→b→c→d. The glyph materials are DoubleSide, so winding is
+ * descriptive only.
+ * @param v The accumulating vert list.
  */
-export const fileWireVerts = (): Float32Array => {
+const pushQuad = (v: number[], a: number[], b: number[], c: number[], d: number[]): void => {
+  pushTri(v, a, b, c)
+  pushTri(v, a, c, d)
+}
+
+/**
+ * Pushes a prism's rim — one wall quad per 2D outline edge spanning
+ * the −t..+t thickness, so a die-cut silhouette keeps a clean edge
+ * from side-on orbit angles.
+ * @param v The accumulating vert list.
+ * @param poly 2D outline points in CCW order.
+ * @param t Prism half-thickness.
+ */
+const pushRim = (v: number[], poly: number[][], t: number): void => {
+  poly.forEach((a, i) => {
+    const nxt = poly[(i + 1) % poly.length] as number[]
+
+    pushQuad(v, [a[0], a[1], -t], [nxt[0], nxt[1], -t], [nxt[0], nxt[1], t], [a[0], a[1], t])
+  })
+}
+
+/**
+ * The folder card's shared 2D anchors — the six-point silhouette
+ * (rectangle body + slant-shouldered tab on the top-left, non-convex
+ * at the tab foot) plus the shelf height the seam pass inks as the
+ * flap line. Fill soup and seam segments both build on these so every
+ * draw pass describes the same solid.
+ * @returns {poly, shelf, w, t} — outline, shelf y, half-width, half-
+ *          thickness.
+ */
+const dirShape = () => {
+  const s = DOCS_UNITS.SCENE_DIR_RADIUS
+  const w = s
+  const h = s * 0.78
+  const shelf = s * 0.42
+  const tabW = s * 0.62
+  const tabS = s * 0.14
+  const t = s * 0.12
+
+  return {
+    // CCW silhouette: bottom edge → right wall → shelf → tab slant →
+    // tab top → left wall. Non-convex at the tab foot — fill splits on
+    // the shelf rather than fanning.
+    poly: [
+      [-w, -h],
+      [w, -h],
+      [w, shelf],
+      [-w + tabW + tabS, shelf],
+      [-w + tabW, h],
+      [-w, h],
+    ],
+    shelf,
+    w,
+    t,
+  }
+}
+
+/**
+ * The file card's shared 2D anchors — the folded-corner pentagon
+ * outline plus the crease point and text-rule heights the seam pass
+ * draws. Fill soup and seam segments both build on these so every
+ * draw pass describes the same solid.
+ * @returns {poly, fold, rules, ruleW, t} — outline, crease point, rule
+ *          ys, rule half-width, half-thickness.
+ */
+const fileShape = () => {
   const s = DOCS_UNITS.SCENE_FILE_RADIUS * 1.3
   const w = s * 0.7
   const h = s
   const c = s * 0.3
+  const t = s * 0.12
+
+  return {
+    // CCW silhouette — the top-right corner is the dog-ear.
+    poly: [
+      [-w, -h],
+      [w, -h],
+      [w, h - c],
+      [w - c, h],
+      [-w, h],
+    ],
+    fold: [w - c, h - c],
+    rules: [-h * 0.18, -h * 0.52],
+    ruleW: w * 0.55,
+    t,
+  }
+}
+
+/**
+ * Filled folder glyph — the classic filled-icon silhouette (rect body
+ * + tab bump) as a thin extruded card, so the tab reads IN the outline
+ * from front, back and glancing angles. The silhouette is non-convex
+ * at the tab foot, so the faces split on the shelf: body quad + tab
+ * quad, no fan. Pure vertex math — no textures, no imported geometry.
+ * Exported: the scene3d arm uploads the same soup.
+ * @returns Flat xyz triplets — triangle soup, every 9 floats one tri.
+ */
+export const dirFillVerts = (): Float32Array => {
+  const { poly, t } = dirShape()
+  const [p0, p1, p2, p3, p4, p5] = poly as [
+    number[],
+    number[],
+    number[],
+    number[],
+    number[],
+    number[],
+  ]
+  const shelfL = [p5[0], p2[1]]
 
   const v: number[] = []
-  const L = (a: number[], b: number[]): void => {
-    v.push(a[0], a[1], a[2], b[0], b[1], b[2])
-  }
+  const f = (p: number[]): number[] => [p[0], p[1], t]
+  const b = (p: number[]): number[] => [p[0], p[1], -t]
 
-  const bl = [-w, -h, 0]
-  const br = [w, -h, 0]
-  const tr1 = [w, h - c, 0]
-  const tr2 = [w - c, h, 0]
-  const tl = [-w, h, 0]
-  const fold = [w - c, h - c, 0]
+  // Body + tab quads on both faces.
+  pushQuad(v, f(p0), f(p1), f(p2), f(shelfL))
+  pushQuad(v, f(shelfL), f(p3), f(p4), f(p5))
+  pushQuad(v, b(p0), b(p1), b(p2), b(shelfL))
+  pushQuad(v, b(shelfL), b(p3), b(p4), b(p5))
 
-  // Page outline + fold diagonal.
-  L(bl, br)
-  L(br, tr1)
-  L(tr1, tr2)
-  L(tr2, tl)
-  L(tl, bl)
-  L(tr2, fold)
-  L(fold, tr1)
-  // Text-rule lines — the "contents" read.
-  for (let i = 0; i < 3; i++) {
-    const ly = -s * 0.2 - i * s * 0.3
-
-    L([-w + s * 0.2, ly, 0], [w - s * 0.2, ly, 0])
-  }
+  pushRim(v, poly, t)
 
   return new Float32Array(v)
 }
 
 /**
- * Bounding radius of a wire segment list — the invisible pick-sphere
- * radius (wire glyphs have no triangle surface to raycast, so picking
- * runs against instanced spheres sized to the glyph's exact bound).
- * Exported: the scene3d arm sizes its JS-side pick spheres from the
- * same bound.
- * @param verts Flat xyz pairs.
+ * Filled document glyph — the folded-corner page as a thin extruded
+ * pentagon prism (the cut corner reads as the fold; the card thickness
+ * keeps the solid visible through the edge-on part of its yaw). Scaled
+ * to SCENE_FILE_RADIUS·1.3 so leaf glyphs read smaller than folders
+ * (the container/item size ratio of the reference). Exported: the
+ * scene3d arm uploads the same soup.
+ * @returns Flat xyz triplets — triangle soup, every 9 floats one tri.
  */
-export const wireBound = (verts: Float32Array): number => {
+export const fileFillVerts = (): Float32Array => {
+  const { poly, t } = fileShape()
+  const p0 = poly[0] as number[]
+
+  const v: number[] = []
+
+  // The pentagon is convex — front face fans from p0; the back mirrors
+  // each fan tri with reversed winding.
+  for (let i = 1; i < poly.length - 1; i++) {
+    const a = poly[i] as number[]
+    const nx = poly[i + 1] as number[]
+
+    pushTri(v, [p0[0], p0[1], t], [a[0], a[1], t], [nx[0], nx[1], t])
+    pushTri(v, [p0[0], p0[1], -t], [nx[0], nx[1], -t], [a[0], a[1], -t])
+  }
+
+  pushRim(v, poly, t)
+
+  return new Float32Array(v)
+}
+
+/**
+ * Pushes the two seam passes every glyph shares: the silhouette
+ * outline on BOTH faces (grown by SCENE_SEAM_GROW so the stroke keys
+ * the edge instead of z-fighting it) and the corner struts tying the
+ * two outlines into the card's rim.
+ * @param v The accumulating segment list (flat xyz pairs).
+ * @param poly 2D outline points in CCW order.
+ * @param t Prism half-thickness.
+ */
+const pushSeamOutline = (v: number[], poly: number[][], t: number): void => {
+  const grow = DOCS_UNITS.SCENE_SEAM_GROW
+
+  const L = (a: number[], b: number[]): void => {
+    v.push(a[0], a[1], a[2], b[0], b[1], b[2])
+  }
+
+  poly.forEach((a, i) => {
+    const nxt = poly[(i + 1) % poly.length] as number[]
+    const ax = a[0] * grow
+    const ay = a[1] * grow
+    const nx = nxt[0] * grow
+    const ny = nxt[1] * grow
+
+    L([ax, ay, t], [nx, ny, t])
+    L([ax, ay, -t], [nx, ny, -t])
+    L([ax, ay, -t], [ax, ay, t])
+  })
+}
+
+/**
+ * Folder seam segments — the detail strokes a filled icon pack prints
+ * on the card: the silhouette outline on both faces, rim struts, and
+ * the shelf line that splits flap from body. Face details ride
+ * SCENE_SEAM_LIFT·t proud of the panel so they never z-fight the fill.
+ * @returns Flat xyz pairs — segment list for the seam LineSegments.
+ */
+export const dirSeamVerts = (): Float32Array => {
+  const { poly, shelf, w, t } = dirShape()
+
+  const v: number[] = []
+
+  pushSeamOutline(v, poly, t)
+
+  const lift = t * DOCS_UNITS.SCENE_SEAM_LIFT
+  const pad = w * 0.14
+
+  // The shelf — the flap/body junction of a filled folder icon.
+  const L = (a: number[], b: number[]): void => {
+    v.push(a[0], a[1], a[2], b[0], b[1], b[2])
+  }
+
+  L([-w + pad, shelf, lift], [w - pad, shelf, lift])
+  L([-w + pad, shelf, -lift], [w - pad, shelf, -lift])
+
+  return new Float32Array(v)
+}
+
+/**
+ * File seam segments — the silhouette outline on both faces, rim
+ * struts, the dog-ear crease and two text rules: the detail a filled
+ * file icon carries once the fill covers the wireframe's empty page.
+ * Face details ride SCENE_SEAM_LIFT·t proud of the panel.
+ * @returns Flat xyz pairs — segment list for the seam LineSegments.
+ */
+export const fileSeamVerts = (): Float32Array => {
+  const { poly, fold, rules, ruleW, t } = fileShape()
+
+  const v: number[] = []
+
+  pushSeamOutline(v, poly, t)
+
+  const lift = t * DOCS_UNITS.SCENE_SEAM_LIFT
+  const [, , tr1, tr2] = poly as [number[], number[], number[], number[], number[]]
+
+  const L = (a: number[], b: number[]): void => {
+    v.push(a[0], a[1], a[2], b[0], b[1], b[2])
+  }
+
+  // Dog-ear crease + text rules on both faces.
+  L([tr2[0], tr2[1], lift], [fold[0], fold[1], lift])
+  L([fold[0], fold[1], lift], [tr1[0], tr1[1], lift])
+  L([tr2[0], tr2[1], -lift], [fold[0], fold[1], -lift])
+  L([fold[0], fold[1], -lift], [tr1[0], tr1[1], -lift])
+
+  rules.forEach((y) => {
+    L([-ruleW, y, lift], [ruleW, y, lift])
+    L([-ruleW, y, -lift], [ruleW, y, -lift])
+  })
+
+  return new Float32Array(v)
+}
+
+/**
+ * Bounding radius of a glyph vert list — the invisible pick-sphere
+ * radius (instanced BufferGeometry isn't on three's raycast path, so
+ * picking runs against instanced spheres sized to the glyph's exact
+ * bound) and the radius edges clip against. Exported: the scene3d arm
+ * sizes its JS-side pick spheres from the same bound.
+ * @param verts Flat xyz triplets (segment list or triangle soup).
+ */
+export const glyphBound = (verts: Float32Array): number => {
   let m = 0
 
   for (let i = 0; i < verts.length; i += 3) {
@@ -618,14 +791,14 @@ export const wireBound = (verts: Float32Array): number => {
 /**
  * Trims an edge so it stops clear of BOTH glyph faces it connects —
  * the reference's links aim at node surfaces, not centers. Each end
- * pulls back by that node's wire bound plus SCENE_EDGE_GAP along the
+ * pulls back by that node's glyph bound plus SCENE_EDGE_GAP along the
  * edge direction; when nothing is left between the trimmed points the
  * edge would draw inside a glyph, so null is returned and the caller
  * drops the segment (degenerate over-close pairs only — relaxed
  * layouts keep every edge longer than the two radii).
  * @param a Child endpoint xyz.
  * @param b Parent endpoint xyz.
- * @param rA Child glyph radius (wireBound·scale).
+ * @param rA Child glyph radius (glyphBound·scale).
  * @param rB Parent glyph radius.
  * @returns Six clipped coords, or null when fully covered.
  */
@@ -701,6 +874,31 @@ export const probeIconInks = (
 }
 
 /**
+ * Folder-ink probe — directory glyphs wear the treeview folder's own
+ * `color` (the reference pack's gold), sampled off a `--folder` probe
+ * span parked inside the portal's shadow root. The custom property
+ * resolves to `currentColor` there, so the seam ink comes from the
+ * computed text color — the real resolved rgb. Returns null where
+ * styles can't compute (tests) — callers fall back to the accent ink.
+ * @param host Element inside the .docs shadow tree (canvas's parent).
+ * @returns [r,g,b] 0-1 channels, or null.
+ */
+export const probeFolderInk = (host: Element): number[] | null => {
+  const probe = document.createElement(HTML_TAGS.SPAN)
+
+  probe.className = `${DOCS_CLASSES.DOCS_TREE_ICON} ${DOCS_CLASSES.DOCS_TREE_ICON}--${DOCS_CLASSES.DOCS_ICON_KINDS.FOLDER}`
+  probe.hidden = true
+
+  host.appendChild(probe)
+
+  const rgb = parseCssColor(getComputedStyle(probe).color)
+
+  probe.remove()
+
+  return rgb
+}
+
+/**
  * Builds a dir-name sprite label — a 2d-canvas texture on a THREE.Sprite.
  * Returns null when 2d canvas is unavailable (happy-dom, exotic runtimes)
  * so the scene still mounts label-free.
@@ -759,14 +957,12 @@ const makeLabel = (
   return { sprite, material }
 }
 
-/** Persisted camera pose + rotation-off flag across scene remounts. */
+/** Persisted camera pose across scene remounts. */
 export interface SceneCamState {
   /** camera.position xyz */
   p: [number, number, number]
   /** controls.target xyz */
   t: [number, number, number]
-  /** true once the user has taken control — autoRotate stays off. */
-  off: boolean
 }
 
 /**
@@ -784,7 +980,7 @@ export const readCamState = (): SceneCamState | null => {
     const d = JSON.parse(raw) as Partial<SceneCamState>
 
     return d.p?.length === 3 && d.t?.length === 3
-      ? { p: d.p as SceneCamState['p'], t: d.t as SceneCamState['t'], off: !!d.off }
+      ? { p: d.p as SceneCamState['p'], t: d.t as SceneCamState['t'] }
       : null
   } catch {
     return null
@@ -1037,31 +1233,23 @@ export const mountArchSceneThree = (
 
   // Reduced-motion viewers never reach this scene — webglAllowed()
   // refuses the context upstream, so the map stays the static DOM
-  // index for them rather than a half-gated canvas.
+  // index for them rather than a half-gated canvas. The map never
+  // rotates on its own: no autorotate, no intro turn — orbiting is a
+  // user-driven gesture only.
   controls.enableDamping = true
-  controls.autoRotate = true
-  controls.autoRotateSpeed = DOCS_UNITS.SCENE_ROTATE_SPEED
 
-  // Restore the user's camera + rotation-off flag from sessionStorage —
-  // once the scene has been steered it remembers the pose across docs
-  // navigations (remounts) and stops the idle drift.
+  // Restore the user's camera pose from sessionStorage — once the scene
+  // has been steered it remembers the pose across docs navigations
+  // (remounts).
   const saved = readCamState()
 
   if (saved) {
     camera.position.set(saved.p[0], saved.p[1], saved.p[2])
 
     controls.target.set(saved.t[0], saved.t[1], saved.t[2])
-
-    controls.autoRotate = !saved.off
   }
 
-  // Intro settle: a fresh (unrestored) mount eases the whole graph in
-  // from SCENE_INTRO_TURN radians — the "object swings into place" read
-  // the portal opened with before ambient autorotate takes over. A
-  // restored pose lands directly on the user's view instead.
-  const introFrom = saved ? 0 : DOCS_UNITS.SCENE_INTRO_TURN
-
-  /** Serializes camera pose + interaction flag into sessionStorage. */
+  /** Serializes camera pose into sessionStorage. */
   const saveCamState = () => {
     try {
       if (typeof sessionStorage === TYPE_STRINGS.UNDEFINED) return
@@ -1069,7 +1257,6 @@ export const mountArchSceneThree = (
       const state: SceneCamState = {
         p: [camera.position.x, camera.position.y, camera.position.z],
         t: [controls.target.x, controls.target.y, controls.target.z],
-        off: !controls.autoRotate,
       }
 
       sessionStorage.setItem(CACHE_STORAGE_KEYS.DOCS_SCENE_STATE, JSON.stringify(state))
@@ -1117,13 +1304,11 @@ export const mountArchSceneThree = (
     focusing = true
   }
 
-  // First user gesture kills the idle rotation for good; gesture end
-  // persists the settled pose. 'start'/'end' are OrbitControls' own
-  // event names (not DOM), tokenized in ORBIT_EVENTS. A gesture also
-  // cancels an in-flight focus glide — input wins over the camera move.
+  // Gesture start cancels an in-flight focus glide — input wins over
+  // the camera move; gesture end persists the settled pose. 'start'/
+  // 'end' are OrbitControls' own event names (not DOM), tokenized in
+  // ORBIT_EVENTS.
   const onControlStart = () => {
-    controls.autoRotate = false
-
     focusing = false
 
     saveCamState()
@@ -1162,23 +1347,24 @@ export const mountArchSceneThree = (
   const labels: LabelRef[] = []
 
   /**
-   * Node draw calls — the procedural-directory look: every directory
-   * renders the wireframe folder glyph, every file the folded-page
-   * glyph, each through ONE instanced LineSegments draw so the
-   * multi-thousand-node graph costs two draw calls (plus the edge set
-   * and revealed labels). Picking runs against invisible instanced
-   * spheres — wire lines have no surface to raycast and three's line
-   * raycast has no instancing path; the pick tier shares the highlight
-   * attribute buffers with the glyph geometry.
+   * Node draw calls — the filled-icon look: every directory renders the
+   * folder card, every file the folded-page card, each as ONE instanced
+   * Mesh (the solid fill) plus ONE instanced LineSegments (the seams —
+   * outline, crease and rule strokes in the page's own background ink,
+   * the icon-pack cutout read) so the graph costs four draw calls plus
+   * the edge set and revealed labels. Picking runs against invisible
+   * instanced spheres — instanced BufferGeometry isn't on three's
+   * raycast path; the pick tier shares the highlight attribute buffers
+   * with the glyph geometries.
    */
   let dirMesh: THREE.InstancedMesh | null = null
 
   let fileMesh: THREE.InstancedMesh | null = null
 
-  /** The instanced wireframe glyph draws — disposed with the scene. */
-  let dirGlyph: THREE.LineSegments | null = null
+  /** The instanced glyph draws per tier — fill + seams + pick. */
+  let dirGlyph: GlyphTier | null = null
 
-  let fileGlyph: THREE.LineSegments | null = null
+  let fileGlyph: GlyphTier | null = null
 
   /** placed[] index per instance slot — a raycast instanceId resolves to a node. */
   const dirPlaced: number[] = []
@@ -1192,9 +1378,11 @@ export const mountArchSceneThree = (
   const pulseTime = { value: 0 }
 
   /** Edge geometry + material — assigned inside buildGraph, disposed in destroy(). */
-  let lineGeo: THREE.BufferGeometry | null = null
+  /** Edge geometries + materials — one draw per link tier (dir
+   *  skeleton at full ink, leaf links dimmed). */
+  const edgeGeos: THREE.BufferGeometry[] = []
 
-  let edgeMat: THREE.LineBasicMaterial | null = null
+  const edgeMats: THREE.LineBasicMaterial[] = []
 
   let disposed = false
 
@@ -1304,29 +1492,36 @@ export const mountArchSceneThree = (
     const m4 = new THREE.Matrix4()
 
     /**
-     * Builds one instanced tier — the wireframe glyph as a single
-     * instanced LineSegments draw (aOffset/aColor/aPhase/aSpin +
-     * aAlpha/aActive drive the vertex shader) plus the invisible
-     * instanced pick sphere. The pick geometry SHARES the alpha/active
-     * attribute objects with the glyph geometry, so the highlight pass
-     * keeps writing one buffer both visuals read.
-     * @param verts       Wire segment list (flat xyz pairs).
+     * Builds one instanced tier — the filled glyph as a single
+     * instanced Mesh draw plus the seam strokes as a single instanced
+     * LineSegments draw (aOffset/aColor/aPhase/aScale +
+     * aAlpha/aActive drive the same vertex shader in both), and the
+     * invisible instanced pick sphere. All three geometries SHARE the
+     * instanced attribute objects, so the highlight pass keeps writing
+     * one buffer every visual in the tier reads.
+     * @param fillVerts   Glyph triangle soup (flat xyz triplets).
+     * @param seamVerts   Detail strokes (flat xyz segment pairs).
      * @param baseOpacity Resting alpha for the tier.
      * @param idxs        placed[] indexes in this tier.
-     * @param rgbOf       Per-node ink resolver (icon-pack palette).
-     * @returns {glyph, pick} — draw object + pick mesh.
+     * @param rgbOf       Per-node ink resolver (icon-pack palette) —
+     *                    inks the SEAMS (the icon's outline + details).
+     * @param faceRgb     Card-body ink — the page bg so glyph faces read
+     *                    as dark cards like the icon pack's paper.
+     * @returns {fill, seam, pick} — the tier's draw objects.
      */
     const buildTier = (
-      verts: Float32Array,
+      fillVerts: Float32Array,
+      seamVerts: Float32Array,
       baseOpacity: number,
       idxs: number[],
-      rgbOf: (_pi: number) => number[]
-    ): { glyph: THREE.LineSegments; pick: THREE.InstancedMesh } => {
+      rgbOf: (_pi: number) => number[],
+      faceRgb: readonly number[]
+    ): GlyphTier => {
       const n = idxs.length
       const offs = new Float32Array(n * 3)
       const cols = new Float32Array(n * 3)
+      const faceCols = new Float32Array(n * 3)
       const phases = new Float32Array(n)
-      const spins = new Float32Array(n)
       const scales = new Float32Array(n)
       const alphaAttr = new THREE.InstancedBufferAttribute(new Float32Array(n).fill(baseOpacity), 1)
       const activeAttr = new THREE.InstancedBufferAttribute(new Float32Array(n), 1)
@@ -1341,43 +1536,80 @@ export const mountArchSceneThree = (
         cols[k * 3] = rgb[0]
         cols[k * 3 + 1] = rgb[1]
         cols[k * 3 + 2] = rgb[2]
+        faceCols[k * 3] = faceRgb[0]
+        faceCols[k * 3 + 1] = faceRgb[1]
+        faceCols[k * 3 + 2] = faceRgb[2]
         scales[k] = scale[pi] as number
 
-        // Golden-angle hashes — decorrelated bob phase + initial yaw
-        // so neighboring glyphs never animate in lockstep.
+        // Golden-angle hash — decorrelated bob phase so neighboring
+        // glyphs never float in lockstep.
         phases[k] = pi * DOCS_UNITS.SCENE_Y_HASH
-        spins[k] = pi * DOCS_UNITS.SCENE_SPIN_HASH
       })
 
-      const geo = new THREE.InstancedBufferGeometry()
+      const offAttr = new THREE.InstancedBufferAttribute(offs, 3)
+      const phaseAttr = new THREE.InstancedBufferAttribute(phases, 1)
+      const scaleAttr = new THREE.InstancedBufferAttribute(scales, 1)
 
-      geo.instanceCount = n
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
-      geo.setAttribute(ATTR_A_OFFSET, new THREE.InstancedBufferAttribute(offs, 3))
-      geo.setAttribute(ATTR_A_COLOR, new THREE.InstancedBufferAttribute(cols, 3))
-      geo.setAttribute(ATTR_A_PHASE, new THREE.InstancedBufferAttribute(phases, 1))
-      geo.setAttribute(ATTR_A_SPIN, new THREE.InstancedBufferAttribute(spins, 1))
-      geo.setAttribute(ATTR_A_SCALE, new THREE.InstancedBufferAttribute(scales, 1))
-      geo.setAttribute(ATTR_A_ALPHA, alphaAttr)
-      geo.setAttribute(ATTR_A_ACTIVE, activeAttr)
+      /**
+       * Attaches the tier's shared instanced streams to one geometry —
+       * fill, seams and pick proxy all read the same attribute buffer
+       * objects, so writeActive's edits land in every draw at once.
+       * @param geo The target instanced geometry.
+       * @param colAttr Per-instance ink (fill ink or seam ink).
+       */
+      const bindShared = (
+        geo: THREE.InstancedBufferGeometry,
+        colAttr: THREE.InstancedBufferAttribute
+      ): void => {
+        geo.instanceCount = n
+        geo.setAttribute(ATTR_A_OFFSET, offAttr)
+        geo.setAttribute(ATTR_A_COLOR, colAttr)
+        geo.setAttribute(ATTR_A_PHASE, phaseAttr)
+        geo.setAttribute(ATTR_A_SCALE, scaleAttr)
+        geo.setAttribute(ATTR_A_ALPHA, alphaAttr)
+        geo.setAttribute(ATTR_A_ACTIVE, activeAttr)
+      }
 
-      const mat = new THREE.LineBasicMaterial({ transparent: true })
+      const fillGeo = new THREE.InstancedBufferGeometry()
 
-      patchGlyphMaterial(mat, pulseTime)
+      fillGeo.setAttribute('position', new THREE.Float32BufferAttribute(fillVerts, 3))
+      // Faces draw the page body (bg ink); seams carry the kind palette —
+      // the icon pack's dark-card + colored-outline read in 3D.
+      bindShared(fillGeo, new THREE.InstancedBufferAttribute(faceCols, 3))
 
-      const glyph = new THREE.LineSegments(geo, mat)
+      const fillMat = new THREE.MeshBasicMaterial({
+        transparent: true,
+        side: THREE.DoubleSide,
+      })
 
-      // Instance positions live in aOffset — the geometry's own bound
+      patchGlyphMaterial(fillMat, pulseTime)
+
+      const fill = new THREE.Mesh(fillGeo, fillMat)
+
+      const seamGeo = new THREE.InstancedBufferGeometry()
+
+      seamGeo.setAttribute('position', new THREE.Float32BufferAttribute(seamVerts, 3))
+      bindShared(seamGeo, new THREE.InstancedBufferAttribute(cols, 3))
+
+      const seamMat = new THREE.LineBasicMaterial({ transparent: true })
+
+      patchGlyphMaterial(seamMat, pulseTime)
+
+      const seam = new THREE.LineSegments(seamGeo, seamMat)
+
+      // Instance positions live in aOffset — the geometries' own bound
       // is a single glyph at origin; culling on it would drop the tier.
-      glyph.frustumCulled = false
+      fill.frustumCulled = false
+      seam.frustumCulled = false
 
-      scene.add(glyph)
+      scene.add(fill)
+      scene.add(seam)
 
-      // Invisible instanced pick spheres — wire lines carry no raycast
-      // surface. Sharing alphaAttr/activeAttr keeps writeActive single-
-      // buffer: the glyph shader sees the same writes the tests read
-      // back off the pick geometry.
-      const pickGeo = new THREE.SphereGeometry(wireBound(verts), 12, 12)
+      // Invisible instanced pick spheres — instanced BufferGeometry has
+      // no three raycast path. Sharing alphaAttr/activeAttr keeps
+      // writeActive single-buffer: the glyph shaders see the same
+      // writes the tests read back off the pick geometry.
+      const pickGeo = new THREE.SphereGeometry(glyphBound(seamVerts), 12, 12)
 
       pickGeo.setAttribute(ATTR_A_ALPHA, alphaAttr)
       pickGeo.setAttribute(ATTR_A_ACTIVE, activeAttr)
@@ -1388,7 +1620,7 @@ export const mountArchSceneThree = (
 
       idxs.forEach((pi, k) => {
         // Pick spheres scale with the rendered glyph — aScale rides the
-        // matrix so raycast hits land on the visible wire bounds.
+        // matrix so raycast hits land on the visible glyph bounds.
         const s = scale[pi] as number
 
         m4.makeScale(s, s, s)
@@ -1403,11 +1635,13 @@ export const mountArchSceneThree = (
 
       pickTables.set(pick, idxs)
 
-      return { glyph, pick }
+      return { fill, seam, pick }
     }
 
-    const dirWire = dirWireVerts()
-    const fileWire = fileWireVerts()
+    const dirFill = dirFillVerts()
+    const fileFill = fileFillVerts()
+    const dirSeam = dirSeamVerts()
+    const fileSeam = fileSeamVerts()
 
     // Per-kind palette — file nodes wear the treeview icon pack's own
     // ink (yellow .js, blue .ts, orange .html…) so the map reads with
@@ -1423,19 +1657,43 @@ export const mountArchSceneThree = (
 
     const accentRgb = parseCssColor(ink) ?? [1, 1, 1]
 
-    const dirTier = buildTier(dirWire, DOCS_UNITS.SCENE_DIR_OPACITY, dirPlaced, () => accentRgb)
+    // Card-body ink — the page's own bg color so glyph faces read as the
+    // icon pack's dark paper on either theme AND occlude the link web
+    // behind them; falls back to dimmed accent ink when --bg-primary
+    // can't be parsed (tests, exotic embeds).
+    const faceRgb = fogRgb ?? accentRgb.map((x) => x * DOCS_UNITS.SCENE_SEAM_SHADE)
+
+    // Directory outlines wear the treeview folder's gold currentColor,
+    // probed off a `--folder` probe (the same ink the DOM pack paints
+    // folders with); unstyled environments fall back to the accent.
+    const dirRgb = probeFolderInk(canvas.parentElement ?? canvas) ?? accentRgb
+
+    const dirTier = buildTier(
+      dirFill,
+      dirSeam,
+      DOCS_UNITS.SCENE_DIR_OPACITY,
+      dirPlaced,
+      () => dirRgb,
+      faceRgb
+    )
 
     dirMesh = dirTier.pick
-    dirGlyph = dirTier.glyph
+    dirGlyph = dirTier
 
-    const fileTier = buildTier(fileWire, DOCS_UNITS.SCENE_FILE_OPACITY, filePlaced, (pi) =>
-      placed[pi].node.aggregate
-        ? accentRgb
-        : (kindInks.get(kindFor(placed[pi].node.name)) ?? accentRgb)
+    const fileTier = buildTier(
+      fileFill,
+      fileSeam,
+      DOCS_UNITS.SCENE_FILE_OPACITY,
+      filePlaced,
+      (pi) =>
+        placed[pi].node.aggregate
+          ? accentRgb
+          : (kindInks.get(kindFor(placed[pi].node.name)) ?? accentRgb),
+      faceRgb
     )
 
     fileMesh = fileTier.pick
-    fileGlyph = fileTier.glyph
+    fileGlyph = fileTier
 
     placed.forEach(({ node, depth }, i) => {
       if (node.type === 'file' || depth > DOCS_UNITS.SCENE_LABEL_MAX_DEPTH) return
@@ -1459,14 +1717,19 @@ export const mountArchSceneThree = (
       }
     })
 
-    const lineVerts: number[] = []
-    const linePhases: number[] = []
+    // Two link tiers: dir→dir edges carry the skeleton at full ink while
+    // file leaves dim to SCENE_EDGE_LEAF of it — the leaf web is the
+    // majority of segments and was the clutter.
+    const dirVerts: number[] = []
+    const leafVerts: number[] = []
+    const dirPhases: number[] = []
+    const leafPhases: number[] = []
 
     // Per-tier glyph bound — links trim at radius+SCENE_EDGE_GAP on both
-    // ends so a line never pierces an icon's wireframe (reference: links
-    // aim at node surfaces with visible clearance, never centers).
-    const dirBound = wireBound(dirWire)
-    const fileBound = wireBound(fileWire)
+    // ends so a line never pierces an icon's seams or faces (reference:
+    // links aim at node surfaces with visible clearance, never centers).
+    const dirBound = glyphBound(dirSeam)
+    const fileBound = glyphBound(fileSeam)
 
     placed.forEach(({ node, parent }, i) => {
       if (parent < 0) return
@@ -1483,29 +1746,41 @@ export const mountArchSceneThree = (
 
       if (!seg) return
 
-      lineVerts.push(seg[0], seg[1], seg[2], seg[3], seg[4], seg[5])
-
       // Each endpoint carries its node's bob phase — the same hash the
       // glyph shader uses, so link ends ride the identical sine as the
-      // wireframes they connect (the reference's per-frame link update,
+      // glyphs they connect (the reference's per-frame link update,
       // but free on the GPU).
-      linePhases.push(i * DOCS_UNITS.SCENE_Y_HASH, parent * DOCS_UNITS.SCENE_Y_HASH)
+      const verts = isDir ? dirVerts : leafVerts
+      const phases = isDir ? dirPhases : leafPhases
+
+      verts.push(seg[0], seg[1], seg[2], seg[3], seg[4], seg[5])
+      phases.push(i * DOCS_UNITS.SCENE_Y_HASH, parent * DOCS_UNITS.SCENE_Y_HASH)
     })
 
-    lineGeo = new THREE.BufferGeometry()
+    const linkDraw = (verts: number[], phases: number[], opacity: number): void => {
+      if (!verts.length) return
 
-    lineGeo.setAttribute('position', new THREE.Float32BufferAttribute(lineVerts, 3))
-    lineGeo.setAttribute(ATTR_A_PHASE, new THREE.Float32BufferAttribute(linePhases, 1))
+      const geo = new THREE.BufferGeometry()
 
-    edgeMat = new THREE.LineBasicMaterial({
-      color: inkColor,
-      transparent: true,
-      opacity: DOCS_UNITS.SCENE_LINE_OPACITY,
-    })
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+      geo.setAttribute(ATTR_A_PHASE, new THREE.Float32BufferAttribute(phases, 1))
 
-    patchEdgeMaterial(edgeMat, pulseTime)
+      const mat = new THREE.LineBasicMaterial({
+        color: inkColor,
+        transparent: true,
+        opacity,
+      })
 
-    scene.add(new THREE.LineSegments(lineGeo, edgeMat))
+      patchEdgeMaterial(mat, pulseTime)
+
+      edgeGeos.push(geo)
+      edgeMats.push(mat)
+
+      scene.add(new THREE.LineSegments(geo, mat))
+    }
+
+    linkDraw(dirVerts, dirPhases, DOCS_UNITS.SCENE_LINE_OPACITY)
+    linkDraw(leafVerts, leafPhases, DOCS_UNITS.SCENE_LINE_OPACITY * DOCS_UNITS.SCENE_EDGE_LEAF)
 
     // The highlight/focus may have been set while positions were in
     // flight — re-apply both now that the meshes + targets exist.
@@ -1603,12 +1878,16 @@ export const mountArchSceneThree = (
       const dist = controls.getDistance()
 
       labels.forEach((l) => {
-        const reveal = Math.max(
-          DOCS_UNITS.LABEL_REVEAL_MIN,
-          DOCS_UNITS.LABEL_REVEAL_BASE - l.depth * DOCS_UNITS.LABEL_DEPTH_STEP
-        )
+        // Reveal thresholds are fractions of the full-graph camera
+        // distance — they scale with whatever radius the manifest
+        // actually spans, so names stay legible from the overview in.
+        const reveal =
+          Math.max(
+            DOCS_UNITS.LABEL_REVEAL_MIN,
+            DOCS_UNITS.LABEL_REVEAL_BASE - l.depth * DOCS_UNITS.LABEL_DEPTH_STEP
+          ) * camDist
 
-        const a = Math.max(0, Math.min(1, (reveal - dist) / DOCS_UNITS.LABEL_FADE))
+        const a = Math.max(0, Math.min(1, (reveal - dist) / (DOCS_UNITS.LABEL_FADE * camDist)))
 
         if (a !== l.a) {
           l.material.opacity = a
@@ -1699,19 +1978,14 @@ export const mountArchSceneThree = (
       // position and the camera dollies to the depth-scaled framing
       // distance. Scalar math on pooled fields only: the mock Vector3s
       // in tests carry no method surface and the frame loop stays
-      // zero-allocation. The goal is re-based through the intro-settle
-      // rotation (rotate about +Y by scene.rotation.y) so the glide
-      // tracks the node even while the spin is still unwinding.
+      // zero-allocation. The graph itself never rotates, so the goal is
+      // the node's raw world position.
       if (focusing) {
-        const cy = Math.cos(scene.rotation.y)
-
-        const sy = Math.sin(scene.rotation.y)
-
-        const gx = focusNode.x * cy + focusNode.z * sy
-
-        const gz = focusNode.z * cy - focusNode.x * sy
+        const gx = focusNode.x
 
         const gy = focusNode.y + DOCS_UNITS.SCENE_FOCUS_Y_BIAS
+
+        const gz = focusNode.z
 
         const ox = camera.position.x - controls.target.x
 
@@ -1750,16 +2024,7 @@ export const mountArchSceneThree = (
 
       controls.update()
 
-      // Intro settle — easeOutCubic from SCENE_INTRO_TURN to 0; after the
-      // window the expression evaluates to exactly 0, so the graph rests
-      // still and controls.autoRotate owns the ambient drift.
-      if (introFrom) {
-        const k = Math.min(1, (performance.now() - t0) / DOCS_UNITS.SCENE_INTRO_MS)
-
-        scene.rotation.y = introFrom * Math.pow(1 - k, 3)
-      }
-
-      // Slow node pulse — the breathing runs in the vertex shader off
+      // Ambient pulse/bob — the breathing runs in the vertex shader off
       // the shared clock; the CPU only feeds it the time uniform.
       pulseTime.value = (performance.now() - t0) / 1000
     } catch (err) {
@@ -1838,9 +2103,13 @@ export const mountArchSceneThree = (
       ;[dirGlyph, fileGlyph].forEach((g) => {
         if (!g) return
 
-        g.geometry.dispose()
+        g.fill.geometry.dispose()
 
-        ;(g.material as THREE.Material).dispose()
+        ;(g.fill.material as THREE.Material).dispose()
+
+        g.seam.geometry.dispose()
+
+        ;(g.seam.material as THREE.Material).dispose()
       })
 
       labels.forEach(({ material }) => {
@@ -1849,9 +2118,9 @@ export const mountArchSceneThree = (
         material.dispose()
       })
 
-      lineGeo?.dispose()
+      edgeGeos.forEach((g) => g.dispose())
 
-      edgeMat?.dispose()
+      edgeMats.forEach((m) => m.dispose())
 
       renderer.dispose()
     },

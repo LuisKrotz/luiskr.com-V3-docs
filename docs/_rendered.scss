@@ -24,14 +24,14 @@
       h2 {
         border-bottom: to-rem($space-3xs) solid currentColor;
         padding-bottom: to-rem($space-2xs);
-        font-weight: 200;
+        font-weight: calc(200 + var(--fw-lift));
       }
 
       h3,
       h4,
       h5,
       h6 {
-        font-weight: 300;
+        font-weight: calc(300 + var(--fw-lift));
       }
 
       a {
@@ -83,7 +83,7 @@
 
         th {
           font-family: var(--font-mono);
-          font-weight: 400;
+          font-weight: calc(400 + var(--fw-lift));
           color: var(--text-secondary);
           white-space: nowrap;
           border-bottom: to-rem($space-3xs) solid currentColor;
@@ -449,7 +449,7 @@
 
       .docs-json-num {
         font-variant-numeric: tabular-nums;
-        font-weight: 400;
+        font-weight: calc(400 + var(--fw-lift));
       }
 
       .docs-json-str {
@@ -488,7 +488,7 @@
 
         th {
           font-family: var(--font-mono);
-          font-weight: 400;
+          font-weight: calc(400 + var(--fw-lift));
           color: var(--text-secondary);
           white-space: nowrap;
           border-bottom: to-rem($space-3xs) solid currentColor;
@@ -509,7 +509,7 @@
         // Pivot tables (coverage-summary shape) — the outer key is the row
         // header; long file paths wrap instead of stretching the table.
         th[scope='row'] {
-          font-weight: 400;
+          font-weight: calc(400 + var(--fw-lift));
           color: var(--text-secondary);
           white-space: normal;
           overflow-wrap: anywhere;

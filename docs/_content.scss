@@ -39,7 +39,7 @@
 
   &-title {
     margin: 0;
-    font-weight: 100;
+    font-weight: calc(100 + var(--fw-lift));
     font-size: to-rem($space-3xl);
     line-height: 1;
     letter-spacing: 0.04em;
@@ -64,7 +64,7 @@
     flex: 1;
 
     // 1025–1280 — the stack cell (combobox nav above content) shares the
-    // row with the right-hand architecture map. The map spans one row so
+    // row with the right-hand file cloud. The map spans one row so
     // its sticky height can never inflate the nav row.
     @media (min-width: #{$vw-1024 + 1px}) and (max-width: #{$vw-1280}) {
       grid-template-columns: minmax(0, 1fr) to-rem($space-7xl);

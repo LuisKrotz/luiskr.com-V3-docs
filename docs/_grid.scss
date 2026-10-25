@@ -34,7 +34,7 @@
     margin: 0;
     padding: 0 0 to-rem($space-2xs);
     font-size: to-rem($space-lg);
-    font-weight: 300;
+    font-weight: calc(300 + var(--fw-lift));
     letter-spacing: to-rem(3);
     text-transform: uppercase;
     border-bottom: var(--space-hairline) solid var(--border-color);
