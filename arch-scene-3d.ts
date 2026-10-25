@@ -29,6 +29,7 @@ import type { Scene3dSurface } from '@core/utils/gpu/scene3d.js'
 import { bindOrbit } from '@core/utils/gpu/orbit-controller.js'
 import type { OrbitController } from '@core/utils/gpu/orbit-controller.js'
 import {
+  clipEdge,
   computePositions,
   dirWireVerts,
   fileWireVerts,
@@ -36,6 +37,7 @@ import {
   makeLabelCanvas,
   placeRoots,
   probeIconInks,
+  resolveScenePath,
   readCamState,
   wireBound,
 } from './arch-scene.js'
@@ -59,6 +61,8 @@ interface ArmNode {
   depth: number
   /** Manifest path — onPick payload + highlight key. */
   path: string
+  /** placed[] index — the parent chain walk for ancestor highlights. */
+  pi: number
   /** Resting opacity (dir/file token). */
   baseOpacity: number
   /** Active-highlight scale multiplier applied in the pulse write. */
@@ -260,21 +264,32 @@ export const segmentsToRibbons = (
  */
 export const buildEdges = (
   placed: readonly PlacedNode[],
-  positions: Float32Array
+  positions: Float32Array,
+  scale: Float32Array
 ): { pos: Float32Array; nrm: Float32Array; uv: Float32Array; idx: Uint32Array } => {
   const segs: number[] = []
 
-  placed.forEach(({ parent }, i) => {
+  // Links trim at glyph radius + SCENE_EDGE_GAP on both ends so lines
+  // never pierce an icon's wireframe (same contract as the three arm).
+  const dirBound = wireBound(dirWireVerts())
+  const fileBound = wireBound(fileWireVerts())
+
+  placed.forEach(({ node, parent }, i) => {
     if (parent < 0) return
 
-    segs.push(
-      positions[i * 3],
-      positions[i * 3 + 1],
-      positions[i * 3 + 2],
-      positions[parent * 3],
-      positions[parent * 3 + 1],
-      positions[parent * 3 + 2]
+    const isDir = node.type !== 'file'
+    const pIsDir = placed[parent].node.type !== 'file'
+
+    const seg = clipEdge(
+      [positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]],
+      [positions[parent * 3], positions[parent * 3 + 1], positions[parent * 3 + 2]],
+      (isDir ? dirBound : fileBound) * (scale[i] as number),
+      (pIsDir ? dirBound : fileBound) * (scale[parent] as number)
     )
+
+    if (!seg) return
+
+    segs.push(seg[0], seg[1], seg[2], seg[3], seg[4], seg[5])
   })
 
   return segmentsToRibbons(segs, DOCS_UNITS.SCENE_EDGE_HALF)
@@ -407,7 +422,10 @@ export const mountArchScene3d = async (
    * set before positions landed still centers once they arrive.
    */
   const startFocus = (path: string) => {
-    const hit = path === CHAR_STRINGS.EMPTY ? undefined : pickables.find((p) => p.path === path)
+    // Aggregated-away paths focus their nearest scene ancestor — the
+    // same resolution the highlight pass runs.
+    const idx = path === CHAR_STRINGS.EMPTY ? -1 : resolveScenePath(placed, path)
+    const hit = idx >= 0 ? pickables.find((p) => p.pi === idx) : undefined
 
     focus.x = hit?.x ?? 0
 
@@ -429,12 +447,23 @@ export const mountArchScene3d = async (
    * larger pulse scale, ancestors lift to SCENE_ANCESTOR_OPACITY.
    */
   const applyActive = () => {
+    // Ancestry walks the placed parent chain — section-group paths
+    // ('group/…') aren't string prefixes of their members' manifest
+    // paths, so path-prefix matching can't see them.
+    const activeIdx = resolveScenePath(placed, activePath)
+    const ancestors = new Set<string>()
+
+    for (
+      let i = activeIdx >= 0 ? (placed[activeIdx].parent as number) : -1;
+      i >= 0;
+      i = placed[i].parent as number
+    ) {
+      ancestors.add(placed[i].node.path)
+    }
+
     pickables.forEach((p) => {
-      const isActive = p.path === activePath
-      const isAncestor =
-        !isActive &&
-        p.path !== CHAR_STRINGS.EMPTY &&
-        activePath.startsWith(`${p.path}${CHAR_STRINGS.SLASH}`)
+      const isActive = p.pi === activeIdx
+      const isAncestor = !isActive && p.path !== CHAR_STRINGS.EMPTY && ancestors.has(p.path)
 
       surface.set_color(
         p.mat,
@@ -456,9 +485,10 @@ export const mountArchScene3d = async (
    * Populates the scene once positions land — shared dir/file sphere
    * geometries, per-node materials (opacity arms), cross-quad edges,
    * then dir-name labels on top.
-   * @param xyz Worker/local position triplets.
+   * @param positions Worker/local result — `xyz` position triplets plus
+   *                  the orbit-proportional glyph `scale` per node.
    */
-  const buildGraph = async (xyz: Float32Array) => {
+  const buildGraph = async ({ xyz, scale }: { xyz: Float32Array; scale: Float32Array }) => {
     if (disposed) return
 
     // Shared wireframe glyph geometries — the same folder/document
@@ -512,15 +542,22 @@ export const mountArchScene3d = async (
 
       surface.set_position(id, x, y, z)
 
+      // The reference's icon-to-orbit proportion — the same aScale the
+      // three arm feeds its instanced glyphs, applied per-mesh here.
+      const gs = scale[i] as number
+
+      surface.set_scale(id, gs, gs, gs)
+
       pickables.push({
         node: id,
         mat,
         x,
         y,
         z,
-        radius: wireBound(isDir ? dirWire : fileWire),
+        radius: wireBound(isDir ? dirWire : fileWire) * gs,
         depth: placed[i].depth,
         path: node.path,
+        pi: i,
         baseOpacity: opacity,
         activeScale: 1,
         rgb: [rgb[0], rgb[1], rgb[2]],
@@ -546,8 +583,13 @@ export const mountArchScene3d = async (
 
               const lid = surface.add_sprite(graphRoot, lmat)
 
-              surface.set_position(lid, x, y + DOCS_UNITS.LABEL_LIFT_Y, z)
-              surface.set_scale(lid, DOCS_UNITS.LABEL_SCALE_X, DOCS_UNITS.LABEL_SCALE_Y, 1)
+              surface.set_position(lid, x, y + DOCS_UNITS.LABEL_LIFT_Y * gs, z)
+              surface.set_scale(
+                lid,
+                DOCS_UNITS.LABEL_SCALE_X * gs,
+                DOCS_UNITS.LABEL_SCALE_Y * gs,
+                1
+              )
 
               labels.push({ node: lid, mat: lmat, depth: placed[i].depth, a: 0 })
             })
@@ -556,7 +598,7 @@ export const mountArchScene3d = async (
       }
     })
 
-    const edges = buildEdges(placed, xyz)
+    const edges = buildEdges(placed, xyz, scale)
 
     if (edges.idx.length > 0) {
       const geo = surface.upload_geometry(edges.pos, edges.nrm, edges.uv, edges.idx, false)
@@ -633,7 +675,11 @@ export const mountArchScene3d = async (
 
       if (d2 > r2) continue
 
-      const t = tca - Math.sqrt(r2 - d2)
+      const root = Math.sqrt(r2 - d2)
+      // Origin inside the sphere → the near root is negative and the
+      // hit lands on the exit surface; orbit-proportioned glyphs are
+      // big enough to contain the camera inside their own cluster.
+      const t = tca - root > 0 ? tca - root : tca + root
 
       if (t > 0 && t < bestT) {
         bestT = t

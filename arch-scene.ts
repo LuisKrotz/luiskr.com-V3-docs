@@ -70,12 +70,16 @@ export interface ArchSceneHandle {
   setPaused(_paused: boolean): void
 }
 
-/** A flattened manifest node with its ring depth and ring angle. */
+/** A flattened manifest node with its depth, sibling slot and parent. */
 export interface PlacedNode {
   node: DocsNode
   depth: number
   angle: number
   parent: number
+  /** Index among this node's siblings (0-based) — the Fibonacci slot. */
+  sib: number
+  /** Sibling count sharing the same parent — sizes the sphere fan. */
+  sibCount: number
 }
 
 /** A dir-name sprite with the depth it answers to (zoom-reveal bucket). */
@@ -113,6 +117,7 @@ const ATTR_A_OFFSET = DOCS_STRINGS.SCENE_ATTR_OFFSET
 const ATTR_A_COLOR = DOCS_STRINGS.SCENE_ATTR_COLOR
 const ATTR_A_PHASE = DOCS_STRINGS.SCENE_ATTR_PHASE
 const ATTR_A_SPIN = DOCS_STRINGS.SCENE_ATTR_SPIN
+const ATTR_A_SCALE = DOCS_STRINGS.SCENE_ATTR_SCALE
 
 /**
  * Wireframe-glyph shader contract — the procedural-directory reference's
@@ -121,6 +126,7 @@ const ATTR_A_SPIN = DOCS_STRINGS.SCENE_ATTR_SPIN
  * per-frame CPU writes:
  *
  *   p      = rotY(uTime·SPIN + aSpin) · position        — node self-yaw
+ *   p     *= aScale                                     — orbit-proportional glyph
  *   p     *= (1 + sin(uTime·PULSE + i·0.7)·AMP)         — ambient pulse
  *          · (1 + aActive·(SCENE_ACTIVE_SCALE − 1))     — active pop
  *   off    = aOffset + (0, sin(uTime·BOB + aPhase)·BAMP, 0)
@@ -138,6 +144,7 @@ const glyphVertexPreamble =
   `attribute float ${ATTR_A_SPIN};\n` +
   `attribute float ${ATTR_A_ALPHA};\n` +
   `attribute float ${ATTR_A_ACTIVE};\n` +
+  `attribute float ${ATTR_A_SCALE};\n` +
   `varying vec3 vColor;\nvarying float vAlpha;\n`
 
 const glyphVertexTransform =
@@ -145,6 +152,7 @@ const glyphVertexTransform =
   `float _sa = uTime * ${DOCS_UNITS.SCENE_NODE_SPIN} + ${ATTR_A_SPIN};\n` +
   `float _sc = cos(_sa), _ss = sin(_sa);\n` +
   `vec3 _p = vec3(transformed.x * _sc - transformed.z * _ss, transformed.y, transformed.x * _ss + transformed.z * _sc);\n` +
+  `_p *= ${ATTR_A_SCALE};\n` +
   `_p *= (1.0 + sin(uTime * ${DOCS_UNITS.SCENE_PULSE_SPEED} + float(gl_InstanceID) * 0.7) * ${DOCS_UNITS.SCENE_PULSE_AMP}) * (1.0 + ${ATTR_A_ACTIVE} * ${DOCS_UNITS.SCENE_ACTIVE_SCALE - 1.0});\n` +
   `vec3 _off = ${ATTR_A_OFFSET};\n` +
   `_off.y += sin(uTime * ${DOCS_UNITS.SCENE_BOB_SPEED} + ${ATTR_A_PHASE}) * ${DOCS_UNITS.SCENE_BOB_AMP};\n` +
@@ -241,7 +249,7 @@ export const layoutNodes = (
 
     const idx = acc.length
 
-    acc.push({ node, depth, angle, parent })
+    acc.push({ node, depth, angle, parent, sib: i, sibCount: nodes.length })
 
     if (node.children?.length) {
       layoutNodes(node.children, depth + 1, cursor, cursor + span, idx, acc)
@@ -254,30 +262,200 @@ export const layoutNodes = (
 }
 
 /**
- * Main-thread twin of the DOCS_SCENE_LAYOUT worker op — the batch
- * fallback for when the wasm pool is unavailable (tests, worker-less
- * environments). Ring radius grows with depth; y carries the depth band
- * plus a golden-angle hash of the node index — sin(i·φ) decorrelates
- * consecutive nodes so same-ring siblings scatter vertically instead of
- * welding into a flat disc of dots.
- * @param depths Ring depth per node.
- * @param angles Ring angle (radians) per node.
- * @returns Flat xyz triplets in node order.
+ * Subtree-extent cluster packing — the hairball fix. The orbit radius at
+ * which node `i`'s children fan around it must clear the whole bounding
+ * sphere of the FATTEST child subtree, not just a sibling-count chord:
+ * two siblings MIN_SEP apart each carrying a descendant cloud of radius
+ * `ext` need their centers ≥ 2·ext + MIN_SEP units apart or the clouds
+ * interpenetrate and weld into the glued mess the old sep-only radii
+ * produced.
+ *
+ * Runs as a bottom-up pass (reverse `placed` order — `layoutNodes`
+ * always emits parents before children, so reversed iteration resolves
+ * every child before its parent):
+ *
+ *   ext[i]     = leaf  → glyph radius
+ *              = inner → cluster[i] + max(ext over children)
+ *   cluster[i] = max(
+ *     SCENE_MIN_ORBIT,                                  // lone-child floor
+ *     (2·maxChildExt + MIN_SEP) / (2·sin(π/kids)),      // sibling clear
+ *     glyphRadius(i) + maxChildExt + MIN_SEP            // glyph clears cloud
+ *   )
+ *
+ * The sibling-clear term is the ring bound `chord = 2R·sin(π/n)` solved
+ * for R — conservative for the Fibonacci sphere (whose uniform spread
+ * beats the ring's worst-case chord), and `ext[0]` ends up the exact
+ * bounding radius of the whole graph for the camera fit.
+ * @param parents  Parent index per node (-1 = root).
+ * @param dirs     1 for directory nodes, 0 for file leaves.
+ * @returns `{ cluster, ext }` — child-orbit radius and subtree bounding
+ *          radius per node.
  */
-const layoutPositionsJs = (depths: number[], angles: number[]): Float32Array => {
-  const xyz = new Float32Array(depths.length * 3)
+const clusterRadii = (parents: number[]): { cluster: Float64Array } => {
+  const n = parents.length
+  const kids = new Int32Array(n)
+  const cluster = new Float64Array(n)
 
-  for (let i = 0; i < depths.length; i++) {
-    const r = DOCS_UNITS.SCENE_BASE_RADIUS + depths[i] * DOCS_UNITS.SCENE_DEPTH_STEP
+  for (let i = 0; i < n; i++) {
+    const p = parents[i] as number
 
-    xyz[i * 3] = Math.cos(angles[i]) * r
-    xyz[i * 3 + 1] =
-      ((depths[i] % 3) - 1) * DOCS_UNITS.SCENE_Y_STEP +
-      Math.sin(i * DOCS_UNITS.SCENE_Y_HASH) * DOCS_UNITS.SCENE_Y_WAVE
-    xyz[i * 3 + 2] = Math.sin(angles[i]) * r
+    if (p >= 0) kids[p]++
   }
 
-  return xyz
+  // Forward pass — parents precede children in placed order, so a
+  // node's own cluster can inherit the orbit it sits on:
+  //
+  //   cluster(i) = max(
+  //     SCENE_MIN_ORBIT,                             // lone-child floor
+  //     cluster(parent) · SCENE_CHILD_SCALE,       // reference shrink
+  //     (2·GLYPH_MAX + MIN_SEP) / (2·sin(π/kids))  // sibling clear
+  //   )
+  //
+  // The sibling-clear term is the ring bound `chord = 2R·sin(π/k)`
+  // solved for R — conservative for the Fibonacci sphere (whose uniform
+  // spread beats the ring's worst-case chord). It sizes orbits for the
+  // LARGEST glyph (SCENE_GLYPH_MAX), so rendered siblings always keep
+  // ≥MIN_SEP clear space between wireframe edges. Unlike subtree-extent
+  // packing this is a single forward pass: sibling clouds may
+  // interpenetrate in depth (the reference accepts this — only icons
+  // need clear space), which keeps the radius geometric instead of
+  // exponential in the tree depth.
+  for (let i = 0; i < n; i++) {
+    const k = kids[i] as number
+    const p = parents[i] as number
+    const inherited = p >= 0 ? (cluster[p] as number) * DOCS_UNITS.SCENE_CHILD_SCALE : 0
+
+    cluster[i] =
+      k === 0
+        ? 0
+        : Math.max(
+            DOCS_UNITS.SCENE_MIN_ORBIT,
+            inherited,
+            (2 * DOCS_UNITS.SCENE_GLYPH_MAX + DOCS_UNITS.SCENE_MIN_SEP) /
+              (2 * Math.sin(Math.PI / Math.max(k, 2)))
+          )
+  }
+
+  return { cluster }
+}
+
+/**
+ * Hierarchical-sphere layout — the procedural-directory reference's
+ * model: every node's children orbit it on a Fibonacci sphere
+ * (phi = acos(1 − 2·(s+0.5)/n), theta = s·golden-angle) at the
+ * parent's cluster radius. Cluster radii come from `clusterRadii` —
+ * the reference's shrink-ratio orbits with a sibling-glyph clearance
+ * floor, so icons keep ≥SCENE_MIN_SEP of wireframe clear space while
+ * subtree clouds compress geometrically (the hairball fix: strict
+ * non-interpenetration grows exponentially and is unreadable past a
+ * few hundred nodes).
+ * Runs iteratively: `layoutNodes` always emits a parent before
+ * its children, so `placed`-order evaluation sees resolved parents.
+ * @param parents Parent index per node (-1 = root).
+ * @param sibs Sibling slot per node.
+ * @param sibCounts Sibling count per node.
+ * @param dirs 1 for directory nodes, 0 for file leaves.
+ * @returns `{ xyz, scale }` — position triplets and the proportional
+ *          glyph scale per node (max(1, FIT·orbit/base)).
+ */
+const layoutPositionsJs = (
+  parents: number[],
+  sibs: number[],
+  sibCounts: number[],
+  dirs: number[]
+): { xyz: Float32Array; scale: Float32Array } => {
+  const n = parents.length
+  const xyz = new Float32Array(n * 3)
+  const scale = new Float32Array(n)
+  const { cluster } = clusterRadii(parents)
+
+  for (let i = 0; i < n; i++) {
+    const p = parents[i] as number
+    const orbit = p < 0 ? (cluster[0] as number) : (cluster[p] as number)
+    const c = Math.max(sibCounts[i] as number, 1)
+    const s = sibs[i] as number
+    const base = dirs[i] ? DOCS_UNITS.SCENE_DIR_RADIUS : DOCS_UNITS.SCENE_FILE_RADIUS
+
+    // The reference's icon-to-orbit ratio: glyph inflates to
+    // SCENE_GLYPH_FIT of the orbit it sits on, capped at
+    // SCENE_GLYPH_MAX (the size the sibling chord is guaranteed
+    // against — a glyph can never outgrow its slot). The root itself
+    // always renders at GLYPH_MAX — it is the big center hub.
+    scale[i] =
+      p < 0
+        ? DOCS_UNITS.SCENE_GLYPH_MAX / base
+        : Math.max(
+            1,
+            Math.min(DOCS_UNITS.SCENE_GLYPH_FIT * orbit, DOCS_UNITS.SCENE_GLYPH_MAX) / base
+          )
+
+    if (p < 0) continue
+
+    // Fibonacci sphere point around the parent's position.
+    const phi = Math.acos(1 - (2 * (s + 0.5)) / c)
+    const theta = s * DOCS_UNITS.SCENE_Y_HASH + p * DOCS_UNITS.SCENE_SPIN_HASH
+
+    xyz[i * 3] = xyz[p * 3] + orbit * Math.sin(phi) * Math.cos(theta)
+    xyz[i * 3 + 1] = xyz[p * 3 + 1] + orbit * Math.cos(phi)
+    xyz[i * 3 + 2] = xyz[p * 3 + 2] + orbit * Math.sin(phi) * Math.sin(theta)
+  }
+
+  // Pairwise relax — sibling-chord sizing guarantees SIBLING clearance,
+  // but deep subtree clouds can still interpenetrate cross-branch (the
+  // reference accepts this; the user-facing contract does not). A few
+  // Jacobi iterations push the rare colliding pairs apart by half the
+  // deficit each — drift stays local, orbits stay readable. Layout-time
+  // only (O(n²·iters) on the capped ~hundreds-node scene tree).
+  const radii = new Float64Array(n)
+
+  for (let i = 0; i < n; i++) {
+    radii[i] =
+      (dirs[i] ? DOCS_UNITS.SCENE_DIR_RADIUS : DOCS_UNITS.SCENE_FILE_RADIUS) * (scale[i] as number)
+  }
+
+  for (let iter = 0; iter < DOCS_UNITS.SCENE_RELAX_ITERS; iter++) {
+    let moved = false
+
+    for (let a = 0; a < n; a++) {
+      for (let b = a + 1; b < n; b++) {
+        const need = (radii[a] as number) + (radii[b] as number) + DOCS_UNITS.SCENE_MIN_SEP
+        const dx = (xyz[b * 3] as number) - (xyz[a * 3] as number)
+        const dy = (xyz[b * 3 + 1] as number) - (xyz[a * 3 + 1] as number)
+        const dz = (xyz[b * 3 + 2] as number) - (xyz[a * 3 + 2] as number)
+        const d = Math.hypot(dx, dy, dz)
+
+        if (d >= need) continue
+
+        // Coincident centers → push along the deterministic parent
+        // hash. The synthetic root is the graph's origin anchor — it
+        // never moves, so the other node absorbs the full deficit.
+        // push = deficit/2 per node → an isolated pair clears in one
+        // iteration; the loop count is for chained collisions.
+        const anchored = a === 0
+        const push = (need - d) / (anchored ? 1 : 2)
+        const inv = d > 1e-6 ? 1 / d : 0
+        const ux = inv ? dx * inv : Math.cos(a * DOCS_UNITS.SCENE_SPIN_HASH)
+        const uy = inv ? dy * inv : 0.5
+        const uz = inv ? dz * inv : Math.sin(a * DOCS_UNITS.SCENE_SPIN_HASH)
+
+        if (!anchored) {
+          xyz[a * 3] = (xyz[a * 3] as number) - ux * push
+          xyz[a * 3 + 1] = (xyz[a * 3 + 1] as number) - uy * push
+          xyz[a * 3 + 2] = (xyz[a * 3 + 2] as number) - uz * push
+        }
+
+        xyz[b * 3] = (xyz[b * 3] as number) + ux * push
+        xyz[b * 3 + 1] = (xyz[b * 3 + 1] as number) + uy * push
+        xyz[b * 3 + 2] = (xyz[b * 3 + 2] as number) + uz * push
+
+        moved = true
+      }
+    }
+
+    if (!moved) break
+  }
+
+  return { xyz, scale }
 }
 
 /**
@@ -287,21 +465,31 @@ const layoutPositionsJs = (depths: number[], angles: number[]): Float32Array => 
  * @param placed Flattened tree nodes.
  * @returns xyz triplets, or null when nothing resolved.
  */
-export const computePositions = async (placed: PlacedNode[]): Promise<Float32Array> => {
-  const depths = placed.map((p) => p.depth)
-  const angles = placed.map((p) => p.angle)
+export const computePositions = async (
+  placed: PlacedNode[]
+): Promise<{ xyz: Float32Array; scale: Float32Array }> => {
+  const parents = placed.map((p) => p.parent)
+  const sibs = placed.map((p) => p.sib ?? 0)
+  const sibCounts = placed.map((p) => p.sibCount ?? 1)
+  const dirs = placed.map((p) => (p.node.type === 'dir' ? 1 : 0))
 
   // Worker replies carry the shape `{ id, type, results: { xyz } }` —
   // `results` is the worker-protocol envelope for every op.
-  const res = (await wasmPool.dispatch(WASM_ACTIONS.DOCS_SCENE_LAYOUT, { depths, angles })) as {
-    results?: { xyz?: ArrayLike<number> }
+  const res = (await wasmPool.dispatch(WASM_ACTIONS.DOCS_SCENE_LAYOUT, {
+    parents,
+    sibs,
+    sibCounts,
+    dirs,
+  })) as {
+    results?: { xyz?: ArrayLike<number>; scale?: ArrayLike<number> }
   } | null
 
   const xyz = res?.results?.xyz
+  const scale = res?.results?.scale
 
-  return xyz && xyz.length === depths.length * 3
-    ? new Float32Array(xyz)
-    : layoutPositionsJs(depths, angles)
+  return xyz && xyz.length === parents.length * 3 && scale && scale.length === parents.length
+    ? { xyz: new Float32Array(xyz), scale: new Float32Array(scale) }
+    : layoutPositionsJs(parents, sibs, sibCounts, dirs)
 }
 
 /**
@@ -425,6 +613,51 @@ export const wireBound = (verts: Float32Array): number => {
   }
 
   return m
+}
+
+/**
+ * Trims an edge so it stops clear of BOTH glyph faces it connects —
+ * the reference's links aim at node surfaces, not centers. Each end
+ * pulls back by that node's wire bound plus SCENE_EDGE_GAP along the
+ * edge direction; when nothing is left between the trimmed points the
+ * edge would draw inside a glyph, so null is returned and the caller
+ * drops the segment (degenerate over-close pairs only — relaxed
+ * layouts keep every edge longer than the two radii).
+ * @param a Child endpoint xyz.
+ * @param b Parent endpoint xyz.
+ * @param rA Child glyph radius (wireBound·scale).
+ * @param rB Parent glyph radius.
+ * @returns Six clipped coords, or null when fully covered.
+ */
+export const clipEdge = (
+  a: readonly [number, number, number],
+  b: readonly [number, number, number],
+  rA: number,
+  rB: number
+): Float32Array | null => {
+  const dx = b[0] - a[0]
+  const dy = b[1] - a[1]
+  const dz = b[2] - a[2]
+  const len = Math.hypot(dx, dy, dz)
+  const gap = DOCS_UNITS.SCENE_EDGE_GAP
+  const spare = len - rA - rB - gap * 2
+
+  if (spare <= 0) return null
+
+  const ux = dx / len
+  const uy = dy / len
+  const uz = dz / len
+  const tA = rA + gap
+  const tB = rB + gap
+
+  return new Float32Array([
+    a[0] + ux * tA,
+    a[1] + uy * tA,
+    a[2] + uz * tA,
+    b[0] - ux * tB,
+    b[1] - uy * tB,
+    b[2] - uz * tB,
+  ])
 }
 
 /**
@@ -582,34 +815,59 @@ export const readCamState = (): SceneCamState | null => {
  * @param node Dir whose children are capped.
  * @returns The same node with capped (copied) children.
  */
+/**
+ * Counts a node's whole subtree — the `+N` on a depth-capped dir's
+ * aggregate leaf. Recursive per the self-similar-traversal rule.
+ * @param node Subtree root.
+ * @returns Total descendant count.
+ */
+const countSceneSubtree = (node: DocsNode): number =>
+  (node.children ?? []).reduce((n, c) => n + 1 + countSceneSubtree(c), 0)
+
 const capSceneLeaves = (node: DocsNode, depth = 1): DocsNode => {
   const kids = node.children
 
   if (!kids?.length) return node
 
-  // The cap shrinks with depth — buckets can afford a handful of leaf
-  // dots, but out at rings 4-5 the leaves are pure comb noise, so they
-  // all collapse into the `+N` aggregate.
-  const cap = Math.max(0, DOCS_UNITS.SCENE_FILE_CAP - depth * DOCS_UNITS.SCENE_FILE_CAP_STEP)
+  const aggregate = (hidden: number): DocsNode => ({
+    type: 'file',
+    name: `${DOCS_STRINGS.AGGREGATE_MARK}${hidden}`,
+    path: node.path,
+    aggregate: true,
+  })
+
+  // Depth cap — the whole subtree collapses into one `+N` leaf that
+  // still picks through to this dir's docs page. The raw manifest is
+  // ~4.4k nodes/10 rings; guaranteed separation can't render that.
+  if (depth >= DOCS_UNITS.SCENE_DEPTH_CAP) {
+    return { ...node, children: [aggregate(countSceneSubtree(node))] }
+  }
+
+  // The caps shrink with depth — buckets can afford a handful of
+  // satellites, but out at rings 4-5 the leaves are pure comb noise,
+  // so they all collapse into the `+N` aggregate. Dir fan-out gets the
+  // same budget (down to SCENE_DIR_CAP_MIN) so a wide dir can't
+  // weld its neighbors shut.
+  const fileCap = Math.max(0, DOCS_UNITS.SCENE_FILE_CAP - depth * DOCS_UNITS.SCENE_FILE_CAP_STEP)
+
+  const dirCap = Math.max(
+    DOCS_UNITS.SCENE_DIR_CAP_MIN,
+    DOCS_UNITS.SCENE_DIR_CAP - depth * DOCS_UNITS.SCENE_DIR_CAP_STEP
+  )
 
   const files = kids.filter((c) => c.type === 'file')
 
-  const shown = new Set(files.slice(0, cap))
+  const dirs = kids.filter((c) => c.type !== 'file')
 
-  const children = kids
-    .filter((c) => c.type !== 'file' || shown.has(c))
-    .map((c) => (c.type === 'file' ? c : capSceneLeaves(c, depth + 1)))
+  const shownFiles = files.slice(0, fileCap)
 
-  const hidden = files.length - shown.size
+  const shownDirs = dirs.slice(0, dirCap)
 
-  if (hidden > 0) {
-    children.push({
-      type: 'file',
-      name: `${DOCS_STRINGS.AGGREGATE_MARK}${hidden}`,
-      path: node.path,
-      aggregate: true,
-    })
-  }
+  const children = [...shownDirs.map((c) => capSceneLeaves(c, depth + 1)), ...shownFiles]
+
+  const hidden = files.length - shownFiles.length + dirs.length - shownDirs.length
+
+  if (hidden > 0) children.push(aggregate(hidden))
 
   return { ...node, children }
 }
@@ -644,6 +902,42 @@ export const placeRoots = (
     },
   ])
 
+/**
+ * Resolves an active docsPath to a placed node — the exact match, or
+ * when the scene caps ('+N' aggregates, depth budget) folded the path
+ * away, the nearest visible ancestor (longest string-prefix + deepest
+ * match wins). Returns -1 for ''/unresolvable paths so the focus falls
+ * back to the portal root. Shared by both arms.
+ * @param placed Flattened placed tree.
+ * @param path   Active docsPath.
+ * @returns placed index of the node to light/focus, or -1.
+ */
+export const resolveScenePath = (placed: readonly PlacedNode[], path: string): number => {
+  // '' is the synthetic portal root — it IS a scene node (index 0) and
+  // lights as active at the portal root, so it resolves like any path.
+  if (!path) return placed.length ? 0 : -1
+
+  let best = -1
+  let bestDepth = -1
+
+  for (let i = 0; i < placed.length; i++) {
+    const p = placed[i].node.path
+
+    if (p === path) return i
+
+    if (
+      p !== CHAR_STRINGS.EMPTY &&
+      path.startsWith(`${p}${CHAR_STRINGS.SLASH}`) &&
+      placed[i].depth > bestDepth
+    ) {
+      bestDepth = placed[i].depth
+      best = i
+    }
+  }
+
+  return best
+}
+
 /** Camera-fit numbers for a placed tree — shared by both arms. */
 export interface GraphFit {
   /** Outer ring radius of the deepest node. */
@@ -655,16 +949,34 @@ export interface GraphFit {
 }
 
 /**
- * Fit the camera to the real graph radius — a deep manifest (outer
- * rings past ~60 units) left the default pose sitting INSIDE the tree,
- * which rendered nodes as giant blobs instead of a legible radial
- * map. dist = r/sin(fov/2) with ~20% margin frames the whole graph.
+ * Fit the camera to the real graph radius — the sphere layout spreads
+ * clusters along parent orbits, so the bound is the longest orbit
+ * chain: distance(node) = orbit(parent→node) + distance(parent),
+ * accumulated down each branch. dist = r/sin(fov/2) with ~20% margin
+ * frames the whole graph.
  * @param placed The flattened placed tree.
  */
 export const graphFit = (placed: readonly PlacedNode[]): GraphFit => {
-  const maxDepth = placed.reduce((m, p) => Math.max(m, p.depth), 0)
+  // Bounding radius = the longest orbit chain plus the largest glyph —
+  // a forward walk over the placed tree (parents precede children, so
+  // dist[p] is always resolved before its descendants).
+  const parents = placed.map((p) => p.parent)
+  const { cluster } = clusterRadii(parents)
+  const dist = new Float64Array(placed.length)
 
-  const graphR = DOCS_UNITS.SCENE_BASE_RADIUS + maxDepth * DOCS_UNITS.SCENE_DEPTH_STEP
+  let graphR = DOCS_UNITS.SCENE_GLYPH_MAX
+
+  for (let i = 0; i < placed.length; i++) {
+    const p = placed[i].parent
+
+    if (p < 0) continue
+
+    const d = (dist[p] as number) + (cluster[p] as number)
+
+    dist[i] = d
+
+    if (d + DOCS_UNITS.SCENE_GLYPH_MAX > graphR) graphR = d + DOCS_UNITS.SCENE_GLYPH_MAX
+  }
 
   const camDist = graphR * DOCS_UNITS.SCENE_CAMERA_FIT
 
@@ -790,7 +1102,10 @@ export const mountArchSceneThree = (
    * for whatever path is active when they arrive.
    */
   const startFocus = (path: string) => {
-    const hit = path === CHAR_STRINGS.EMPTY ? undefined : nodeTargets.get(path)
+    // Aggregated-away paths focus their nearest scene ancestor — the
+    // same resolution the highlight pass runs.
+    const idx = path === CHAR_STRINGS.EMPTY ? -1 : resolveScenePath(placed, path)
+    const hit = idx >= 0 ? nodeTargets.get(placed[idx].node.path) : undefined
 
     focusNode.set(hit?.pos.x ?? 0, hit?.pos.y ?? 0, hit?.pos.z ?? 0)
 
@@ -889,6 +1204,9 @@ export const mountArchSceneThree = (
    * pulse scale (aActive=1), and ancestor dirs on its branch lift to
    * SCENE_ANCESTOR_OPACITY so the route's lineage reads on the map.
    * Everything else keeps the faint backdrop alpha for its tier.
+   * Ancestry walks the placed parent chain — section-group paths
+   * ('group/…') aren't string prefixes of their members' manifest
+   * paths, so path-prefix matching can't see them.
    */
   const writeActive = (
     mesh: THREE.InstancedMesh | null,
@@ -900,13 +1218,23 @@ export const mountArchSceneThree = (
     const alpha = mesh.geometry.getAttribute(ATTR_A_ALPHA) as THREE.InstancedBufferAttribute
     const act = mesh.geometry.getAttribute(ATTR_A_ACTIVE) as THREE.InstancedBufferAttribute
 
+    const activeIdx = resolveScenePath(placed, activePath)
+    const ancestors = new Set<string>()
+
+    for (
+      let p = activeIdx >= 0 ? (placed[activeIdx].parent as number) : -1;
+      p >= 0;
+      p = placed[p].parent as number
+    ) {
+      ancestors.add(placed[p].node.path)
+    }
+
     idxs.forEach((pi, k) => {
       const p = placed[pi].node.path
 
-      const isActive = p === activePath
+      const isActive = pi === activeIdx
 
-      const isAncestor =
-        !isActive && p !== CHAR_STRINGS.EMPTY && activePath.startsWith(`${p}${CHAR_STRINGS.SLASH}`)
+      const isAncestor = !isActive && p !== CHAR_STRINGS.EMPTY && ancestors.has(p)
 
       alpha.setX(
         k,
@@ -943,8 +1271,9 @@ export const mountArchSceneThree = (
   /**
    * Populates the scene once the (possibly worker-computed) positions
    * land — meshes, edges, then dir-name labels on top of dir nodes.
+   * `scale` carries each node's orbit-proportional glyph factor.
    */
-  const buildGraph = (xyz: Float32Array) => {
+  const buildGraph = ({ xyz, scale }: { xyz: Float32Array; scale: Float32Array }) => {
     if (disposed) return
 
     const positions: THREE.Vector3[] = []
@@ -998,6 +1327,7 @@ export const mountArchSceneThree = (
       const cols = new Float32Array(n * 3)
       const phases = new Float32Array(n)
       const spins = new Float32Array(n)
+      const scales = new Float32Array(n)
       const alphaAttr = new THREE.InstancedBufferAttribute(new Float32Array(n).fill(baseOpacity), 1)
       const activeAttr = new THREE.InstancedBufferAttribute(new Float32Array(n), 1)
 
@@ -1011,6 +1341,7 @@ export const mountArchSceneThree = (
         cols[k * 3] = rgb[0]
         cols[k * 3 + 1] = rgb[1]
         cols[k * 3 + 2] = rgb[2]
+        scales[k] = scale[pi] as number
 
         // Golden-angle hashes — decorrelated bob phase + initial yaw
         // so neighboring glyphs never animate in lockstep.
@@ -1026,6 +1357,7 @@ export const mountArchSceneThree = (
       geo.setAttribute(ATTR_A_COLOR, new THREE.InstancedBufferAttribute(cols, 3))
       geo.setAttribute(ATTR_A_PHASE, new THREE.InstancedBufferAttribute(phases, 1))
       geo.setAttribute(ATTR_A_SPIN, new THREE.InstancedBufferAttribute(spins, 1))
+      geo.setAttribute(ATTR_A_SCALE, new THREE.InstancedBufferAttribute(scales, 1))
       geo.setAttribute(ATTR_A_ALPHA, alphaAttr)
       geo.setAttribute(ATTR_A_ACTIVE, activeAttr)
 
@@ -1055,6 +1387,11 @@ export const mountArchSceneThree = (
       pick.visible = false
 
       idxs.forEach((pi, k) => {
+        // Pick spheres scale with the rendered glyph — aScale rides the
+        // matrix so raycast hits land on the visible wire bounds.
+        const s = scale[pi] as number
+
+        m4.makeScale(s, s, s)
         m4.setPosition(positions[pi])
 
         pick.setMatrixAt(k, m4)
@@ -1108,7 +1445,9 @@ export const mountArchSceneThree = (
       if (label) {
         label.sprite.position.copy(positions[i])
 
-        label.sprite.position.y += DOCS_UNITS.LABEL_LIFT_Y
+        label.sprite.position.y += DOCS_UNITS.LABEL_LIFT_Y * (scale[i] as number)
+        label.sprite.scale.x *= scale[i] as number
+        label.sprite.scale.y *= scale[i] as number
 
         // Labels start hidden — the reveal pass flips visibility when
         // the camera is close enough for the name to read.
@@ -1123,17 +1462,28 @@ export const mountArchSceneThree = (
     const lineVerts: number[] = []
     const linePhases: number[] = []
 
-    placed.forEach(({ parent }, i) => {
+    // Per-tier glyph bound — links trim at radius+SCENE_EDGE_GAP on both
+    // ends so a line never pierces an icon's wireframe (reference: links
+    // aim at node surfaces with visible clearance, never centers).
+    const dirBound = wireBound(dirWire)
+    const fileBound = wireBound(fileWire)
+
+    placed.forEach(({ node, parent }, i) => {
       if (parent < 0) return
 
-      lineVerts.push(
-        positions[i].x,
-        positions[i].y,
-        positions[i].z,
-        positions[parent].x,
-        positions[parent].y,
-        positions[parent].z
+      const isDir = node.type !== 'file'
+      const pIsDir = placed[parent].node.type !== 'file'
+
+      const seg = clipEdge(
+        [positions[i].x, positions[i].y, positions[i].z],
+        [positions[parent].x, positions[parent].y, positions[parent].z],
+        (isDir ? dirBound : fileBound) * (scale[i] as number),
+        (pIsDir ? dirBound : fileBound) * (scale[parent] as number)
       )
+
+      if (!seg) return
+
+      lineVerts.push(seg[0], seg[1], seg[2], seg[3], seg[4], seg[5])
 
       // Each endpoint carries its node's bob phase — the same hash the
       // glyph shader uses, so link ends ride the identical sine as the

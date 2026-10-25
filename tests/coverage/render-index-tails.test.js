@@ -100,7 +100,9 @@ describe('docs index — streaming tails', () => {
 
     const anchors = index.querySelectorAll('a')
 
-    expect(anchors.length).toBe(DOCS_UNITS.INDEX_CHUNK + 3)
+    // 'empty' dir heading link + INDEX_CHUNK+1 file links — the docs
+    // bucket itself flattened into the group row (not a link).
+    expect(anchors.length).toBe(DOCS_UNITS.INDEX_CHUNK + 2)
   })
 
   test('index links are non-tabbable and non-anchor clicks never navigate', async () => {

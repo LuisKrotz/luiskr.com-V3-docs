@@ -11,7 +11,7 @@ import { A11Y_CLASSES } from '@core/tokens/classes/a11y.js'
 import { ARIA_ATTRS } from '@core/tokens/attrs/aria.js'
 import { ATTR_VALUES } from '@core/tokens/attrs/values.js'
 import { DATA_ATTRS } from '@core/tokens/attrs/data.js'
-import { HTML_TAGS } from '@core/tokens/elements/html.js'
+import { HTML_PHRASING_TAGS, HTML_TAGS } from '@core/tokens/elements/html.js'
 import { FORM_ATTRS } from '@core/tokens/attrs/form.js'
 import { MICRODATA_ATTRS, MICRODATA_VALUES } from '@core/tokens/attrs/microdata.js'
 import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
@@ -27,9 +27,9 @@ import { h } from '@core/jsx.js'
 import { isPlainClick } from '@core/utils/dom.js'
 import { ARROW_GLYPHS } from '@core/tokens/theme/arrows.js'
 import { treeIcon } from './tree-icon.js'
-import { crumbsForPath, getDocsManifest } from './manifest.js'
+import { crumbsForPath, docsGroups } from './manifest.js'
 import type { ViewDocs } from './Docs.js'
-import type { DocsNode, DocsRoot } from './manifest.js'
+import type { DocsNode } from './manifest.js'
 
 /**
  * Absolute `/docs` route for a manifest-relative path — the canonical URL
@@ -76,41 +76,65 @@ const treeNodes = (view: ViewDocs, nodes: DocsNode[]): HTMLElement[] =>
 
     const isDir = node.type === 'dir'
 
+    /* Disclosure chevron — dirs carry the arrow (down = closed,
+       up = expanded, rotated by CSS); files get an empty spacer
+       so the icon column stays aligned across mixed rows. */
+    const chevron = isDir ? (
+      <svg
+        className={DOCS_CLASSES.DOCS_TREE_CHEVRON}
+        viewBox="0 0 12 12"
+        aria-hidden={ATTR_VALUES.TRUE}
+      >
+        <path d="M3 4.4 L6 7.6 L9 4.4" />
+      </svg>
+    ) : (
+      <i className={DOCS_CLASSES.DOCS_TREE_CHEVRON} aria-hidden={ATTR_VALUES.TRUE} />
+    )
+
     return (
       <li key={node.path} role={ARIA_ATTRS.ROLE_NONE}>
-        <a
-          role={ARIA_ATTRS.ROLE_TREEITEM}
-          href={treeHref(view, node, open)}
-          className={`${DOCS_CLASSES.DOCS_TREE_ITEM}${open ? ` ${DOCS_CLASSES.DOCS_TREE_OPEN}` : CHAR_STRINGS.EMPTY}`}
-          aria-expanded={isDir ? String(open) : undefined}
-          aria-current={active ? 'page' : undefined}
-          {...{ [DATA_ATTRS.DATA_PATH]: node.path }}
-          onClick={(e: Event) => {
-            // Modified/middle clicks keep native anchor semantics (new tab).
-            if (!isPlainClick(e)) return
+        {node.group ? (
+          // Section-group row — a disclosure-only treeitem: the sections
+          // have no manifest route, so the row is a button (toggles the
+          // member list) rather than a crawlable anchor.
+          <button
+            type={FORM_ATTRS.TYPE_BUTTON}
+            role={ARIA_ATTRS.ROLE_TREEITEM}
+            className={`${DOCS_CLASSES.DOCS_TREE_ITEM} ${DOCS_CLASSES.DOCS_TREE_GROUP}${open ? ` ${DOCS_CLASSES.DOCS_TREE_OPEN}` : CHAR_STRINGS.EMPTY}`}
+            aria-expanded={String(open)}
+            tabindex={view.treeTabIndex(node.path)}
+            {...{ [DATA_ATTRS.DATA_PATH]: node.path }}
+            onFocus={() => view.treeFocusItem(node.path)}
+            onClick={() => view.toggleDir(node.path)}
+          >
+            {chevron}
+            {treeIcon(node, open)}
+            {node.name}
+          </button>
+        ) : (
+          <a
+            role={ARIA_ATTRS.ROLE_TREEITEM}
+            href={treeHref(view, node, open)}
+            className={`${DOCS_CLASSES.DOCS_TREE_ITEM}${open ? ` ${DOCS_CLASSES.DOCS_TREE_OPEN}` : CHAR_STRINGS.EMPTY}`}
+            aria-expanded={isDir ? String(open) : undefined}
+            aria-current={active ? 'page' : undefined}
+            tabindex={view.treeTabIndex(node.path)}
+            {...{ [DATA_ATTRS.DATA_PATH]: node.path }}
+            onFocus={() => view.treeFocusItem(node.path)}
+            onClick={(e: Event) => {
+              // Modified/middle clicks keep native anchor semantics (new tab).
+              if (!isPlainClick(e)) return
 
-            e.preventDefault()
+              e.preventDefault()
 
-            view.pickTreeNode(node)
-          }}
-        >
-          {/* Disclosure chevron — dirs carry the arrow (down = closed,
-              up = expanded, rotated by CSS); files get an empty spacer
-              so the icon column stays aligned across mixed rows. */}
-          {isDir ? (
-            <svg
-              className={DOCS_CLASSES.DOCS_TREE_CHEVRON}
-              viewBox="0 0 12 12"
-              aria-hidden={ATTR_VALUES.TRUE}
-            >
-              <path d="M3 4.4 L6 7.6 L9 4.4" />
-            </svg>
-          ) : (
-            <i className={DOCS_CLASSES.DOCS_TREE_CHEVRON} aria-hidden={ATTR_VALUES.TRUE} />
-          )}
-          {treeIcon(node, open)}
-          {node.name}
-        </a>
+              view.pickTreeNode(node)
+            }}
+          >
+            {chevron}
+            {treeIcon(node, open)}
+            {node.name}
+          </a>
+        )}
         {isDir && open && node.children?.length ? (
           <ul role={ARIA_ATTRS.ROLE_GROUP}>{treeNodes(view, node.children)}</ul>
         ) : null}
@@ -125,32 +149,36 @@ const treeNodes = (view: ViewDocs, nodes: DocsNode[]): HTMLElement[] =>
  * inside an h3 so every listed document is a real heading AT heading-jump
  * (and crawlers) can enumerate.
  */
-const gridCards = (view: ViewDocs, nodes: DocsNode[]): HTMLElement[] =>
+const gridCards = (
+  view: ViewDocs,
+  nodes: DocsNode[],
+  headTag: string = HTML_TAGS.H3
+): HTMLElement[] =>
   nodes.map((node) => {
     const isDir = node.type === 'dir'
 
-    return (
-      <h3 key={node.path} className={DOCS_CLASSES.DOCS_CARD_HEADING}>
-        <a
-          href={docsHref(node.path)}
-          className={DOCS_CLASSES.DOCS_CARD}
-          {...{ [DATA_ATTRS.DATA_PATH]: node.path }}
-          onClick={(e: Event) => {
-            if (!isPlainClick(e)) return
+    return h(
+      headTag,
+      { key: node.path, className: DOCS_CLASSES.DOCS_CARD_HEADING },
+      <a
+        href={docsHref(node.path)}
+        className={DOCS_CLASSES.DOCS_CARD}
+        {...{ [DATA_ATTRS.DATA_PATH]: node.path }}
+        onClick={(e: Event) => {
+          if (!isPlainClick(e)) return
 
-            e.preventDefault()
+          e.preventDefault()
 
-            view.pickNode(node)
-          }}
-        >
-          {/* Card art mirrors the treeview icon pack — same animated
+          view.pickNode(node)
+        }}
+      >
+        {/* Card art mirrors the treeview icon pack — same animated
               glyph vocabulary (folder sheets / kind pack) at card size. */}
-          <span className={DOCS_CLASSES.DOCS_CARD_ART}>
-            {treeIcon(node, isDir && view.isDirOpen(node.path))}
-          </span>
-          <span className={DOCS_CLASSES.DOCS_CARD_LABEL}>{node.name}</span>
-        </a>
-      </h3>
+        <span className={DOCS_CLASSES.DOCS_CARD_ART}>
+          {treeIcon(node, isDir && view.isDirOpen(node.path))}
+        </span>
+        <span className={DOCS_CLASSES.DOCS_CARD_LABEL}>{node.name}</span>
+      </a>
     )
   }) as HTMLElement[]
 
@@ -207,10 +235,17 @@ const indexLink = (path: string, label: string): HTMLElement =>
  * @param depth 1-based depth below the bucket heading.
  * @yields Heading elements (dirs) and anchor elements (files) in order.
  */
+/** Heading tag ladder for index depths 1–4 (h4→h6 capped — deeper stays h6). */
+const _INDEX_HEADS = [HTML_PHRASING_TAGS.H4, HTML_PHRASING_TAGS.H5, HTML_PHRASING_TAGS.H6] as const
+
 function* indexNodes(nodes: DocsNode[], depth: number): Generator<HTMLElement> {
   for (const node of nodes) {
     if (node.type === 'dir') {
-      yield h(`h${Math.min(3 + depth, 6)}`, null, indexLink(node.path, node.name)) as HTMLElement
+      yield h(
+        _INDEX_HEADS[Math.min(depth, _INDEX_HEADS.length) - 1],
+        null,
+        indexLink(node.path, node.name)
+      ) as HTMLElement
 
       if (node.children?.length) yield* indexNodes(node.children, depth + 1)
     } else {
@@ -220,17 +255,19 @@ function* indexNodes(nodes: DocsNode[], depth: number): Generator<HTMLElement> {
 }
 
 /**
- * Streams the root buckets + their subtrees — h3 bucket links first, then
- * each root's nodes in document order. Generator shape per the
+ * Streams the section groups + member subtrees — an h3 label per group
+ * (sections are disclosure-only, so the heading carries no link), then
+ * each member's nodes in document order (dirs as heading links one level
+ * under the group, files as bare anchors). Generator shape per the
  * self-similar-traversal rule; the puller controls pacing.
- * @param roots The manifest roots.
+ * @param groups The four section nodes parenting the manifest roots.
  * @yields Index elements in document order.
  */
-function* indexEntries(roots: DocsRoot[]): Generator<HTMLElement> {
-  for (const root of roots) {
-    yield h('h3', null, indexLink(root.root, root.label)) as HTMLElement
+function* indexEntries(groups: DocsNode[]): Generator<HTMLElement> {
+  for (const group of groups) {
+    yield h(HTML_TAGS.H3, null, group.name) as HTMLElement
 
-    yield* indexNodes(root.children, 1)
+    yield* indexNodes(group.children ?? [], 1)
   }
 }
 
@@ -319,7 +356,7 @@ const docsIndex = (view: ViewDocs): HTMLElement => {
     ) as HTMLElement
 
     scheduleIndexSlice(() =>
-      pumpIndex(indexEntries(getDocsManifest().roots), _indexEl!, document.createDocumentFragment())
+      pumpIndex(indexEntries(docsGroups()), _indexEl!, document.createDocumentFragment())
     )
   }
 
@@ -402,8 +439,10 @@ export const renderDocs = (view: ViewDocs) => {
 
   const isRoot = !view.docsPath
 
-  // Portal root lists the four buckets; a dir lists its children.
-  const children = isRoot ? view.rootsAsNodes() : node?.type === 'dir' ? node.children || [] : []
+  // Portal root lists the four section groups; a dir lists its children.
+  const sections = isRoot ? view.rootsAsNodes() : []
+
+  const children = isRoot ? [] : node?.type === 'dir' ? node.children || [] : []
 
   const generated = view.generatedAt()
 
@@ -481,11 +520,7 @@ export const renderDocs = (view: ViewDocs) => {
             panel keeps the full crumb row + editable input above the
             treeview. ≥1281px the panel is always open as the left
             column and the button/hidden-crumbs bow out via CSS. */}
-          <nav
-            className={DOCS_CLASSES.DOCS_NAV}
-            aria-label={DOCS_STRINGS.TREE_LABEL}
-            onKeydown={(e: Event) => view.onTreeKey(e as KeyboardEvent)}
-          >
+          <nav className={DOCS_CLASSES.DOCS_NAV} aria-label={DOCS_STRINGS.TREE_LABEL}>
             <button
               type={FORM_ATTRS.TYPE_BUTTON}
               className={DOCS_CLASSES.DOCS_NAV_TOGGLE}
@@ -509,6 +544,7 @@ export const renderDocs = (view: ViewDocs) => {
                 id={DOCS_IDS.TREE}
                 role={ARIA_ATTRS.ROLE_TREE}
                 aria-label={DOCS_STRINGS.TREE_LABEL}
+                onKeydown={(e: Event) => view.onTreeKey(e as KeyboardEvent)}
               >
                 {treeNodes(view, view.rootsAsNodes())}
               </ul>
@@ -558,7 +594,30 @@ export const renderDocs = (view: ViewDocs) => {
               </section>
             ) : null}
 
-            {children.length ? (
+            {isRoot ? (
+              sections.length ? (
+                <div
+                  className={DOCS_CLASSES.DOCS_GRID}
+                  id={DOCS_IDS.GRID}
+                  role={ARIA_ATTRS.ROLE_REGION}
+                  aria-label={DOCS_STRINGS.GRID_LABEL}
+                  onKeydown={(e: Event) => view.onGridKey(e as KeyboardEvent)}
+                >
+                  {sections.map((g) => (
+                    <section
+                      key={g.path}
+                      className={DOCS_CLASSES.DOCS_GRID_GROUP}
+                      aria-label={g.name}
+                    >
+                      {/* h3 group head → h4 cards keeps the heading ladder
+                          honest under the h2 region label. */}
+                      <h3 className={DOCS_CLASSES.DOCS_GRID_GROUP_HEAD}>{g.name}</h3>
+                      {gridCards(view, g.children ?? [], HTML_PHRASING_TAGS.H4)}
+                    </section>
+                  ))}
+                </div>
+              ) : null
+            ) : children.length ? (
               <div
                 className={DOCS_CLASSES.DOCS_GRID}
                 id={DOCS_IDS.GRID}
@@ -585,15 +644,20 @@ export const renderDocs = (view: ViewDocs) => {
             on the persistent scene canvas, tap-to-pick navigates. The
             zoom trigger re-seats the SAME canvas into the centered glass
             dialog — no context loss, no remount. */}
-        <aside className={DOCS_CLASSES.DOCS_MAP} aria-label={DOCS_STRINGS.MAP_LABEL}>
+        <aside className={DOCS_CLASSES.DOCS_MAP} aria-labelledby={DOCS_IDS.MAP_LABEL}>
           <div className={DOCS_CLASSES.DOCS_MAP_HEAD}>
-            <span className={DOCS_CLASSES.DOCS_SCENE_HINT}>{DOCS_STRINGS.SCENE_HINT}</span>
+            <span className={DOCS_CLASSES.DOCS_SCENE_HINT} id={DOCS_IDS.MAP_LABEL}>
+              {DOCS_STRINGS.SCENE_HINT}
+            </span>
             <button
               type={FORM_ATTRS.TYPE_BUTTON}
               className={DOCS_CLASSES.DOCS_MAP_ZOOM}
               aria-label={DOCS_STRINGS.MAP_ZOOM}
               aria-expanded={String(view._mapZoomed)}
-              aria-controls={DOCS_IDS.MAP_MODAL}
+              // The modal id only exists while zoomed — pointing
+              // aria-controls at a not-yet-rendered element trips
+              // aria_id_unique/aria-controls-validity checks.
+              aria-controls={view._mapZoomed ? DOCS_IDS.MAP_MODAL : undefined}
               onClick={() => view.toggleMapZoom()}
             >
               {CHAR_STRINGS.EXPAND_GLYPH}
@@ -629,6 +693,7 @@ export const renderDocs = (view: ViewDocs) => {
                 >
                   <canvas
                     className={`${PREF_CLASSES.PREF_CLOSE_CANVAS} ${STATE_CLASSES.IS_FALLBACK}`}
+                    aria-hidden={ATTR_VALUES.TRUE}
                   />
                   <span
                     className={EXPAND_MODAL_CLASSES.EXPAND_MODAL_CLOSE_BAR_FALLBACK}

@@ -35,16 +35,17 @@ describe('treeIcon — node-shape arms', () => {
     expect(svg.querySelectorAll(PAPER).length).toBe(0)
   })
 
-  test('an open dir draws the mouth plate + flap and one toned paper per child', () => {
+  test('an open dir draws the mouth plate + flap and papers in the folder ink', () => {
     const children = [{ type: 'file', name: 'a.md', path: 'docs/full/a.md' }]
 
     const svg = treeIcon({ type: 'dir', name: 'full', path: 'docs/full', children }, true)
 
     expect(svg.querySelector(FLAP)).toBeTruthy()
     expect(svg.querySelectorAll(PAPER).length).toBe(1)
-    // The lone (front) sheet fans out in its tone modifier + bob group.
+    // The lone (front) sheet leans out with the slow bob animation —
+    // plain .docs-tree-paper now, the reference pack dropped the tone fan.
     expect(svg.querySelector(`g animateTransform`)).toBeTruthy()
-    expect(svg.querySelector(`.${DOCS_CLASSES.DOCS_TREE_PAPER_TONES[0]}`)).toBeTruthy()
+    expect(svg.querySelector(`.${DOCS_CLASSES.DOCS_TREE_PAPER_TONES[0]}`)).toBeFalsy()
   })
 
   test('a closed dir with many children caps the peeking page tops', () => {
@@ -61,7 +62,7 @@ describe('treeIcon — node-shape arms', () => {
     expect(svg.querySelector(FLAP)).toBeFalsy()
   })
 
-  test('an open dir fans more sheets than the closed cap allows', () => {
+  test('an open dir caps the leaning sheets at the reference pair', () => {
     const children = Array.from({ length: 6 }, (_, i) => ({
       type: 'file',
       name: `f${i}.ts`,
@@ -70,12 +71,9 @@ describe('treeIcon — node-shape arms', () => {
 
     const svg = treeIcon({ type: 'dir', name: 'wide', path: 'docs/wide', children }, true)
 
-    // 6 children → capped fan (TREE_SHEET_CAP_OPEN), each sheet toned.
-    expect(svg.querySelectorAll(PAPER).length).toBe(4)
-
-    for (const tone of DOCS_CLASSES.DOCS_TREE_PAPER_TONES) {
-      expect(svg.querySelector(`.${tone}`)).toBeTruthy()
-    }
+    // 6 children → capped lean (TREE_SHEET_CAP_OPEN = 2) — the reference
+    // pack's open folder shows two restrained pages, not a fan.
+    expect(svg.querySelectorAll(PAPER).length).toBe(2)
   })
 
   test('a middling dir shows a mid-height stack', () => {

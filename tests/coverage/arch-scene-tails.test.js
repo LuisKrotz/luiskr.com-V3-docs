@@ -148,6 +148,10 @@ jest.unstable_mockModule('three', () => {
     setPosition() {
       return this
     }
+
+    makeScale() {
+      return this
+    }
   }
 
   class InstancedMesh extends Mesh {
@@ -335,9 +339,10 @@ const flush = (ms = 40) => new Promise((r) => setTimeout(r, ms))
  * render as TWO InstancedMesh tiers — dir spheres first, file spheres
  * second, in scene-add order — and a path's instance slot is the index
  * it holds inside its own tier (the same partition buildGraph runs).
+ * `placed` overrides the fixture tree — the ViewDocs mounts feed the
+ * section groups, not the local ROOTS.
  */
-const instanceAttrs = (Scene, path) => {
-  const placed = placeRoots(ROOTS)
+const instanceAttrs = (Scene, path, placed = placeRoots(ROOTS)) => {
   const isDir = placed.find((p) => p.node.path === path)?.node.type !== 'file'
   const slot = placed
     .filter((p) => (p.node.type !== 'file') === isDir)
@@ -540,7 +545,9 @@ describe('docs architecture scene', () => {
     await flush()
 
     expect(view._sceneHandle).toBe(first)
-    expect(activeSpy).toHaveBeenCalledWith('docs')
+    // The docs bucket isn't a scene node — its children flatten into
+    // the Documentation section, so the group path carries the highlight.
+    expect(activeSpy).toHaveBeenCalledWith(`${DOCS_STRINGS.GROUP_PATH_PREFIX}docs`)
 
     cleanup()
     router.currentRoute = prev
@@ -646,9 +653,9 @@ describe('docs architecture scene', () => {
   })
 
   test('wasm-dispatched positions populate the graph when the pool answers', async () => {
-    const spy = jest
-      .spyOn(wasmPool, 'dispatch')
-      .mockImplementation(async () => ({ results: { xyz: new Float32Array(21).fill(0) } }))
+    const spy = jest.spyOn(wasmPool, 'dispatch').mockImplementation(async () => ({
+      results: { xyz: new Float32Array(21).fill(0), scale: new Float32Array(7).fill(1) },
+    }))
 
     const canvas = document.createElement(HTML_TAGS.CANVAS)
 
@@ -1053,7 +1060,7 @@ describe('docs architecture scene', () => {
 
       const placed = placeRoots(ROOTS)
       const idx = placed.findIndex((p) => p.node.path === 'docs/architecture')
-      const xyz = await computePositions(placed)
+      const { xyz } = await computePositions(placed)
 
       const gx = xyz[idx * 3]
       const gy = xyz[idx * 3 + 1] + DOCS_UNITS.SCENE_FOCUS_Y_BIAS
@@ -1185,10 +1192,18 @@ describe('docs architecture scene', () => {
     await flush()
 
     // The nav re-render remounts the scene; assert the wiring end-to-end
-    // via the painted highlight on the fresh scene's node.
+    // via the painted highlight on the fresh scene's node. The docs
+    // bucket itself isn't a scene node — its children flatten into the
+    // Documentation section, so the group node carries the highlight.
     const { Scene } = await import('three')
+    const { docsGroups } = await import('@docs/manifest.js')
+    const placed = placeRoots(
+      docsGroups().map((g) => ({ root: g.path, label: g.name, children: g.children ?? [] }))
+    )
 
-    expect(instanceAttrs(Scene, 'docs').alpha).toBeCloseTo(DOCS_UNITS.SCENE_ACTIVE_OPACITY)
+    expect(instanceAttrs(Scene, `${DOCS_STRINGS.GROUP_PATH_PREFIX}docs`, placed).alpha).toBeCloseTo(
+      DOCS_UNITS.SCENE_ACTIVE_OPACITY
+    )
 
     cleanup()
     router.currentRoute = prev
@@ -1744,5 +1759,148 @@ describe('docs architecture scene', () => {
     await flush()
 
     canvas.remove()
+  })
+
+  test('sphere layout keeps every sibling pair ≥ SCENE_MIN_SEP apart', async () => {
+    // A dense parent: 12 files on one cluster sphere — the Fibonacci
+    // spread is the contract that replaced the hairball ring layout.
+    const dense = [
+      {
+        root: 'docs',
+        label: 'Documentation',
+        children: [
+          {
+            type: 'dir',
+            name: 'packed',
+            path: 'docs/packed',
+            children: Array.from({ length: 12 }, (_, i) => ({
+              type: 'file',
+              name: `f${i}.md`,
+              path: `docs/packed/f${i}.md`,
+              id: `docs:packed/f${i}.md`,
+            })),
+          },
+          {
+            type: 'dir',
+            name: 'other',
+            path: 'docs/other',
+            children: [
+              { type: 'file', name: 'o.md', path: 'docs/other/o.md', id: 'docs:other/o.md' },
+            ],
+          },
+        ],
+      },
+    ]
+
+    const placed = placeRoots(dense)
+    const { xyz } = await computePositions(placed)
+    const kids = []
+
+    for (let i = 0; i < placed.length; i++)
+      if (placed[i].node.path.startsWith('docs/packed/')) kids.push(i)
+
+    // Every sibling pair on the packed dir's sphere stays ≥ MIN_SEP
+    // chart units — Fibonacci spacing lands ~70% above the floor.
+    for (let a = 0; a < kids.length; a++)
+      for (let b = a + 1; b < kids.length; b++) {
+        const d = Math.hypot(
+          xyz[kids[a] * 3] - xyz[kids[b] * 3],
+          xyz[kids[a] * 3 + 1] - xyz[kids[b] * 3 + 1],
+          xyz[kids[a] * 3 + 2] - xyz[kids[b] * 3 + 2]
+        )
+
+        expect(d).toBeGreaterThanOrEqual(DOCS_UNITS.SCENE_MIN_SEP)
+      }
+
+    // The two top-level dir centers are siblings on the root sphere —
+    // the branch separation the reference layout's nested spheres buy.
+    const pi = placed.findIndex((p) => p.node.path === 'docs/packed')
+    const oi = placed.findIndex((p) => p.node.path === 'docs/other')
+    const branchDist = Math.hypot(
+      xyz[pi * 3] - xyz[oi * 3],
+      xyz[pi * 3 + 1] - xyz[oi * 3 + 1],
+      xyz[pi * 3 + 2] - xyz[oi * 3 + 2]
+    )
+
+    expect(branchDist).toBeGreaterThanOrEqual(DOCS_UNITS.SCENE_MIN_SEP)
+  })
+
+  test('sphere layout keeps sibling subtree clouds ≥ SCENE_MIN_SEP apart', async () => {
+    // The hairball contract beyond sibling centers: each sibling's whole
+    // descendant cloud must stay MIN_SEP clear of every other sibling's
+    // cloud — the extent-packing fix for branches welding together.
+    const tree = [
+      {
+        root: 'docs',
+        label: 'Documentation',
+        children: [
+          {
+            type: 'dir',
+            name: 'alpha',
+            path: 'docs/alpha',
+            children: [
+              {
+                type: 'dir',
+                name: 'inner',
+                path: 'docs/alpha/inner',
+                children: Array.from({ length: 8 }, (_, i) => ({
+                  type: 'file',
+                  name: `a${i}.md`,
+                  path: `docs/alpha/inner/a${i}.md`,
+                  id: `docs:alpha/inner/a${i}.md`,
+                })),
+              },
+            ],
+          },
+          {
+            type: 'dir',
+            name: 'beta',
+            path: 'docs/beta',
+            children: [
+              {
+                type: 'dir',
+                name: 'deep',
+                path: 'docs/beta/deep',
+                children: Array.from({ length: 8 }, (_, i) => ({
+                  type: 'file',
+                  name: `b${i}.md`,
+                  path: `docs/beta/deep/b${i}.md`,
+                  id: `docs:beta/deep/b${i}.md`,
+                })),
+              },
+            ],
+          },
+        ],
+      },
+    ]
+
+    const placed = placeRoots(tree)
+    const { xyz } = await computePositions(placed)
+
+    const dist = (a, b) =>
+      Math.hypot(
+        xyz[a * 3] - xyz[b * 3],
+        xyz[a * 3 + 1] - xyz[b * 3 + 1],
+        xyz[a * 3 + 2] - xyz[b * 3 + 2]
+      )
+
+    // Every node inside docs/alpha's subtree (descendants + the dir
+    // itself) stays MIN_SEP clear of every node inside docs/beta's —
+    // subtree-extent packing guarantees non-interpenetrating clouds.
+    const alpha = []
+    const beta = []
+
+    for (let i = 0; i < placed.length; i++) {
+      const path = placed[i].node.path
+
+      if (path === 'docs/alpha' || path.startsWith('docs/alpha/')) alpha.push(i)
+      if (path === 'docs/beta' || path.startsWith('docs/beta/')) beta.push(i)
+    }
+
+    expect(alpha.length).toBeGreaterThan(1)
+    expect(beta.length).toBeGreaterThan(1)
+
+    for (const a of alpha)
+      for (const b of beta) expect(dist(a, b)).toBeGreaterThanOrEqual(DOCS_UNITS.SCENE_MIN_SEP)
   })
 })

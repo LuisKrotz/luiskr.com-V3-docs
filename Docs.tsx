@@ -13,6 +13,7 @@
  */
 
 import { ARIA_ATTRS } from '@core/tokens/attrs/aria.js'
+import { ATTR_VALUES } from '@core/tokens/attrs/values.js'
 import { PREF_CLASSES } from '@core/tokens/classes/preferences.js'
 import { READER_CLASSES } from '@core/tokens/classes/reader.js'
 import { DATA_ATTRS } from '@core/tokens/attrs/data.js'
@@ -44,6 +45,8 @@ import {
   fetchDocsFile,
   isSourceRoot,
   fileIdRoot,
+  docsGroups,
+  docsGroupParent,
   type DocsNode,
   type DocsFilePayload,
 } from './manifest.js'
@@ -105,6 +108,14 @@ export class ViewDocs extends BaseComponent {
    */
   private _focusPath: string | null = null
 
+  /**
+   * The treeview's roving tab stop — path of the single tabindex="0"
+   * row. APG trees take ONE tab stop: Tab enters the widget once,
+   * arrows move inside it. Every other row carries tabindex="-1" so
+   * keyboard users aren't forced through thousands of links.
+   */
+  private _treeTabPath: string | null = null
+
   private _guardDispose: GuardDisposer | null = null
 
   private _glHandle: DocsGlHandle | null = null
@@ -147,14 +158,23 @@ export class ViewDocs extends BaseComponent {
     super(docsStyles)
   }
 
-  /** Manifest roots reshaped as dir-nodes for the treeview. */
+  /** Section nodes parenting the manifest roots — memoized; the group
+   *  rows seed open so the grouped tree lands with its members visible
+   *  like the flat list it replaced. */
+  private _sectionNodes: DocsNode[] | null = null
+
+  /** Manifest roots grouped under the four section nodes for the
+   *  treeview and the portal-root grid. */
   rootsAsNodes(): DocsNode[] {
-    return getDocsManifest().roots.map((r) => ({
-      type: 'dir',
-      name: r.label,
-      path: r.root,
-      children: r.children,
-    }))
+    if (!this._sectionNodes) {
+      this._sectionNodes = docsGroups()
+
+      for (const g of this._sectionNodes) {
+        this._openDirs.add(g.path)
+      }
+    }
+
+    return this._sectionNodes
   }
 
   /** ISO generated stamp shown under the title. */
@@ -165,6 +185,36 @@ export class ViewDocs extends BaseComponent {
   /** Whether a dir path is expanded in the treeview. */
   isDirOpen(path: string): boolean {
     return this._openDirs.has(path)
+  }
+
+  /**
+   * Roving tabindex for a rendered tree row — '0' only on the current
+   * tab-stop path so the treeview exposes exactly one Tab entry per the
+   * ARIA treeview pattern (IBM widget_tabbable_single).
+   * @param path Manifest path of the row being rendered.
+   */
+  treeTabIndex(path: string): string {
+    return path === this._treeTabPath ? ATTR_VALUES.TABINDEX_ZERO : ATTR_VALUES.NEGATIVE_TABINDEX
+  }
+
+  /**
+   * Focus landed on a tree row (arrow move, click-focus, or the
+   * _focusPath restore): make it the widget's single tab stop by
+   * flipping tabindex across the live rows — an attribute flip, not a
+   * re-render, so focus never churns mid-gesture.
+   * @param path Manifest path of the focused row.
+   */
+  treeFocusItem(path: string): void {
+    this._treeTabPath = path
+
+    for (const btn of this._treeButtons()) {
+      btn.setAttribute(
+        ARIA_ATTRS.TABINDEX,
+        btn.getAttribute(DATA_ATTRS.DATA_PATH) === path
+          ? ATTR_VALUES.TABINDEX_ZERO
+          : ATTR_VALUES.NEGATIVE_TABINDEX
+      )
+    }
   }
 
   /** Whether the open file sits under a protected source-module root. */
@@ -191,8 +241,15 @@ export class ViewDocs extends BaseComponent {
   /**
    * Grid/tree click — dirs toggle expansion AND navigate so the grid lands
    * on the folder; files navigate straight to their file route.
+   * Section-group nodes have no route — they only toggle disclosure.
    */
   pickNode(node: DocsNode): void {
+    if (node.group) {
+      this.toggleDir(node.path)
+
+      return
+    }
+
     if (node.type === 'dir') this._openDirs.add(node.path)
 
     this.navigateDocs(node.path)
@@ -359,12 +416,16 @@ export class ViewDocs extends BaseComponent {
         this.toggleDir(path)
       } else {
         // Focus the parent dir row — the nearest previous button whose
-        // path is the current one's parent segment.
+        // path is the current one's parent segment; section members climb
+        // to their group row (their real path parent is not a rendered
+        // row, e.g. 'src' → 'group/source', 'docs/sassdoc' → 'group/docs').
         const parentPath = path.split(CHAR_STRINGS.SLASH).slice(0, -1).join(CHAR_STRINGS.SLASH)
 
-        const parent = items.find(
-          (b) => (b.getAttribute(DATA_ATTRS.DATA_PATH) as string) === parentPath
-        )
+        const parent =
+          items.find((b) => (b.getAttribute(DATA_ATTRS.DATA_PATH) as string) === parentPath) ||
+          items.find(
+            (b) => (b.getAttribute(DATA_ATTRS.DATA_PATH) as string) === docsGroupParent(path)
+          )
 
         parent?.focus()
       }
@@ -551,8 +612,11 @@ export class ViewDocs extends BaseComponent {
     // resolved node path carries the root-bucket prefix the scene's
     // target table keys on; bare URLs ('architecture/x.md') resolve to
     // 'docs/architecture/x.md' before the lookup, and unresolvable
-    // paths fall back to the portal root.
-    this._sceneHandle?.setActive(this.node?.path || CHAR_STRINGS.EMPTY)
+    // paths fall back to the portal root. Bucket roots whose children
+    // were promoted into a section (the docs bucket → Documentation)
+    // aren't scene nodes themselves — their highlight lands on the
+    // owning section group.
+    this._sceneHandle?.setActive(this._scenePath(this.node?.path || CHAR_STRINGS.EMPTY))
 
     this._syncMapCloseBtn()
 
@@ -570,6 +634,18 @@ export class ViewDocs extends BaseComponent {
       )
 
       target?.focus()
+    }
+
+    // Roving-tabstop guarantee — first render (null _treeTabPath) and a
+    // collapse that hid the stop both leave every row at tabindex="-1";
+    // promote the first rendered row so the tree always keeps one Tab
+    // entry instead of becoming unreachable by keyboard.
+    const treeItems = this._treeButtons()
+
+    if (treeItems.length && !treeItems.some((b) => b.tabIndex === 0)) {
+      this._treeTabPath = treeItems[0].getAttribute(DATA_ATTRS.DATA_PATH) as string
+
+      treeItems[0].setAttribute(ARIA_ATTRS.TABINDEX, ATTR_VALUES.TABINDEX_ZERO)
     }
 
     // Map-zoom focus hand-off — the expand-modal contract: the dialog's
@@ -684,6 +760,35 @@ export class ViewDocs extends BaseComponent {
   }
 
   /**
+   * Maps a manifest path to the path the scene knows — section groups
+   * are scene nodes ('group/…'), manifest members are scene nodes, but
+   * a bucket root whose children were promoted into a section (the
+   * docs bucket → Documentation) exists only in the URL space, so its
+   * highlight maps to the owning group node.
+   * @param path Manifest-relative docs path.
+   * @returns The scene node's path for the highlight/focus lookup.
+   */
+  private _scenePath(path: string): string {
+    if (!path) return path
+
+    const groups = docsGroups()
+    const inScene = groups.some(
+      (g) =>
+        g.path === path ||
+        (g.children ?? []).some((c) => c.path === path) ||
+        !(getDocsManifest().roots as Array<{ root: string }>).some((r) => r.root === path)
+    )
+
+    if (inScene) return path
+
+    const owner = groups.find((g) =>
+      (g.children ?? []).some((c) => c.path.startsWith(`${path}${CHAR_STRINGS.SLASH}`))
+    )
+
+    return owner?.path ?? path
+  }
+
+  /**
    * Mounts/remounts the 3D scene on the given canvas. `onLost` marks the
    * canvas with the scene-off class and clears the handle so a later
    * `webglcontextrestored` can rebuild it — the portal stays usable the
@@ -696,8 +801,17 @@ export class ViewDocs extends BaseComponent {
 
     this._sceneHandle = mountArchScene(
       canvas,
-      getDocsManifest().roots,
-      (path) => this.navigateDocs(path),
+      // The scene's top ring IS the portal's four sections — the map
+      // reads Source Code / Documentation / Architecture / Reports as
+      // separated clusters instead of a flat 19-bucket fan.
+      docsGroups().map((g) => ({ root: g.path, label: g.name, children: g.children ?? [] })),
+      (path) => {
+        // Section-group paths aren't routable — picking one does
+        // nothing beyond the highlight pass (mirrors pickNode).
+        if (path.startsWith(DOCS_STRINGS.GROUP_PATH_PREFIX)) return
+
+        this.navigateDocs(path)
+      },
       () => {
         canvas.classList.add(DOCS_CLASSES.DOCS_SCENE_OFF)
 
@@ -800,6 +914,12 @@ export class ViewDocs extends BaseComponent {
     segments.slice(0, -1).forEach((_seg, i) => {
       this._openDirs.add(segments.slice(0, i + 1).join(CHAR_STRINGS.SLASH))
     })
+
+    // Section rows are not path ancestors — a routed member ('src/x',
+    // 'docs/sassdoc') still needs its group row open to stay visible.
+    const groupPath = docsGroupParent(docsPath)
+
+    if (groupPath) this._openDirs.add(groupPath)
 
     // Folders carrying an index.html auto-open it (e.g. the sassdoc
     // report) — except under source-module roots, which stay browsable

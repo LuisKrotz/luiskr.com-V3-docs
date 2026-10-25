@@ -11,6 +11,35 @@
     gap: to-rem($space-md);
   }
 
+  // Portal-root section group — each of the four disclosure sections
+  // (Docs / Architecture / Source / Reports) spans the grid's full width
+  // and lays its member cards out on the same track sizing.
+  &-grid-group {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(to-rem($space-5xl), 1fr));
+    gap: to-rem($space-md);
+    align-content: start;
+
+    + .#{$_B_DOCS}-grid-group {
+      margin-top: to-rem($space-md);
+    }
+  }
+
+  // Section heading — a real h3 labelling each group (h2 region → h3
+  // group → h4 cards keeps the heading ladder honest); the hairline
+  // underline is the same chrome the crumb row uses as a separator.
+  &-grid-group-head {
+    grid-column: 1 / -1;
+    margin: 0;
+    padding: 0 0 to-rem($space-2xs);
+    font-size: to-rem($space-lg);
+    font-weight: 300;
+    letter-spacing: to-rem(3);
+    text-transform: uppercase;
+    border-bottom: var(--space-hairline) solid var(--border-color);
+  }
+
   // Card heading wrapper — every grid entry is a real h3 so AT
   // heading-jump and crawlers enumerate each doc; the wrapped anchor
   // keeps all the card chrome.

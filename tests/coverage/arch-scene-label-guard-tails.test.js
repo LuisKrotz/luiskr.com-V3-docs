@@ -130,6 +130,10 @@ jest.unstable_mockModule('three', () => {
     setPosition() {
       return this
     }
+
+    makeScale() {
+      return this
+    }
   }
 
   class InstancedMesh extends Mesh {

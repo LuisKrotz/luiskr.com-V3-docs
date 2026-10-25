@@ -228,6 +228,16 @@
     }
   }
 
+  // Section-group row — the four disclosure parents (Docs / Architecture
+  // / Source / Reports) read slightly heavier than their members so the
+  // top level scans as a divider, not just another folder.
+  &-tree-item--group {
+    font-weight: 300;
+    letter-spacing: to-rem(3);
+    text-transform: uppercase;
+    opacity: 1;
+  }
+
   // ── Row icons — the animated icon pack. Every file kind inks through
   //    `--icon-ink` (each `--{kind}` modifier maps to a themed palette
   //    var); folders keep the row's currentColor with paper sheets. ────

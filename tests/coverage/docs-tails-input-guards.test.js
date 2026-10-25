@@ -85,8 +85,9 @@ describe('Docs input guards — non-plain activations keep native semantics', ()
       expect(ev.defaultPrevented).toBe(false)
     }
 
-    // The path crumb only renders once the viewer sits inside a dir.
-    view.pickNode(view.rootsAsNodes()[0])
+    // The path crumb only renders once the viewer sits inside a dir —
+    // pick a routed member (Source Code section → 'src' root).
+    view.pickNode(view.rootsAsNodes()[2].children[0])
     await flush()
 
     const pathCrumb = $(`.${DOCS_CLASSES.DOCS_CRUMB}`)[1]

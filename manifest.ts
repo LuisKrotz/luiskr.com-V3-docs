@@ -28,6 +28,11 @@ export interface DocsNode {
   /** Scene-only flag — `+N` aggregate leaves the leaf cap synthesizes
    *  for surplus file children; the map colors them with the dir ink. */
   aggregate?: boolean
+  /** View-synthesized section node — a disclosure wrapper the portal
+   *  tree/grid renders above the real roots (Source Code, Documentation,
+   *  Architecture Docs, Reports). Toggles only: no manifest path or
+   *  route exists for a section, so group rows never navigate. */
+  group?: boolean
 }
 
 /** A publishable root bucket (docs / reports / coverage-* / source modules). */
@@ -126,6 +131,108 @@ const _manifest = hydrateManifest(manifest)
 
 /** The scanned manifest — the vite plugin + jest stub always emit one. */
 export const getDocsManifest = (): DocsManifest => _manifest
+
+/** Direct-member path → its section's path (e.g. 'src' → 'group/source'). */
+const _groupParents = new Map<string, string>()
+
+/** Memoized section nodes — the manifest is static per build. */
+let _groups: DocsNode[] | null = null
+
+/**
+ * Builds the four portal section nodes. The docs root's children flatten
+ * straight into Documentation (the 'docs' bucket itself is not a tree
+ * row — its URL stays reachable via crumbs/links); the `architecture`
+ * subtree is promoted into its own Architecture Docs section. Source and
+ * reports/coverage roots keep their bucket nodes as section members —
+ * every member carries its real path, so /docs/<path> URLs never change.
+ * @returns Ordered section nodes (empty sections dropped).
+ */
+const buildGroups = (): DocsNode[] => {
+  const rootNode = (r: DocsRoot): DocsNode => ({
+    type: 'dir',
+    name: r.label,
+    path: r.root,
+    children: r.children,
+  })
+
+  const docsRoot = _manifest.roots.find((r) => r.kind === 'docs')
+
+  const archNode = docsRoot?.children.find((c) => c.name === DOCS_STRINGS.ARCH_DIR)
+
+  const defs: Array<[string, string, DocsNode[]]> = [
+    [
+      `${DOCS_STRINGS.GROUP_PATH_PREFIX}docs`,
+      DOCS_STRINGS.GROUP_DOCS_LABEL,
+      docsRoot ? docsRoot.children.filter((c) => c.name !== DOCS_STRINGS.ARCH_DIR) : [],
+    ],
+    [
+      `${DOCS_STRINGS.GROUP_PATH_PREFIX}architecture`,
+      DOCS_STRINGS.GROUP_ARCH_LABEL,
+      archNode ? [archNode] : [],
+    ],
+    [
+      `${DOCS_STRINGS.GROUP_PATH_PREFIX}source`,
+      DOCS_STRINGS.GROUP_SOURCE_LABEL,
+      _manifest.roots.filter((r) => r.kind === 'source').map(rootNode),
+    ],
+    [
+      `${DOCS_STRINGS.GROUP_PATH_PREFIX}reports`,
+      DOCS_STRINGS.GROUP_REPORTS_LABEL,
+      _manifest.roots.filter((r) => r.kind === 'reports' || r.kind === 'coverage').map(rootNode),
+    ],
+  ]
+
+  const groups: DocsNode[] = []
+
+  for (const [path, name, children] of defs) {
+    if (!children.length) continue
+
+    for (const child of children) {
+      _groupParents.set(child.path, path)
+    }
+
+    groups.push({ type: 'dir', name, path, children, group: true })
+  }
+
+  return groups
+}
+
+/**
+ * The four section nodes that parent the flat manifest roots in the
+ * treeview and the portal-root grid. Built once — the manifest never
+ * changes after hydration.
+ * @returns Ordered section dir-nodes flagged `group: true`.
+ */
+export const docsGroups = (): DocsNode[] => {
+  _groups ??= buildGroups()
+
+  return _groups
+}
+
+/**
+ * The section-group path containing a manifest path — walks ancestors so
+ * deep paths ('docs/sassdoc/index.html') resolve through their section
+ * member ('docs/sassdoc') to the owning group ('group/docs'). Used to
+ * auto-open the group row for a routed path and to climb Arrow-Left out
+ * of a section member (its real path parent is not a rendered row).
+ * @param path Manifest-relative docs path.
+ * @returns The owning 'group/<id>' path, or undefined outside the tree.
+ */
+export const docsGroupParent = (path: string): string | undefined => {
+  docsGroups()
+
+  for (let p = path; p;) {
+    const group = _groupParents.get(p)
+
+    if (group) return group
+
+    const cut = p.lastIndexOf(CHAR_STRINGS.SLASH)
+
+    p = cut < 0 ? CHAR_STRINGS.EMPTY : p.slice(0, cut)
+  }
+
+  return undefined
+}
 
 /** ISO timestamp of the newest doc file — shown as "last docs update". */
 export const docsGeneratedAt = (): string => _manifest.generated

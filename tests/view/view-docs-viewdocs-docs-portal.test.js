@@ -15,6 +15,7 @@ import { DOCS_STRINGS } from '@core/tokens/strings/docs.js'
 import { DOCS_SELECTORS } from '@core/tokens/selectors/docs.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 import { SCHEMA_STRINGS } from '@core/tokens/strings/schema.js'
+import { DATA_ATTRS } from '@core/tokens/attrs/data.js'
 import { CLIPBOARD_EVENTS, KEYBOARD_EVENTS, MOUSE_EVENTS } from '@core/tokens/events/dom.js'
 import { KEYS } from '@core/tokens/primitives.js'
 import { SOCIAL_URLS } from '@core/tokens/media/urls.js'
@@ -108,7 +109,8 @@ describe('ViewDocs — docs portal', () => {
     expect($(`.${DOCS_CLASSES.DOCS_CRUMB_EDIT}`)).toBeTruthy()
     expect($(`#${DOCS_IDS.GL}`)).toBeTruthy()
     expect($(`#${DOCS_IDS.SCENE}`)).toBeTruthy()
-    expect($(`.${DOCS_CLASSES.DOCS_GRID}`).children.length).toBe(3)
+    // The portal grid sections the flat root buckets under four groups.
+    expect($(`.${DOCS_CLASSES.DOCS_GRID}`).children.length).toBe(4)
     expect(view.shadowRoot.querySelector('legal-footer')).toBeFalsy()
   })
 
@@ -124,11 +126,12 @@ describe('ViewDocs — docs portal', () => {
 
     expect(treeHead.textContent).toBe(DOCS_STRINGS.TREE_LABEL)
 
-    // Every grid card is wrapped in an h3 — each listed doc is a heading.
+    // Every grid card is wrapped in a heading — on the grouped portal
+    // root the group h3s own level 3, so cards emit h4s.
     const cardHeads = $$(`.${DOCS_CLASSES.DOCS_CARD_HEADING}`)
 
-    expect(cardHeads.length).toBe(3)
-    expect(cardHeads.every((hEl) => hEl.tagName === 'H3' && hEl.querySelector('a'))).toBe(true)
+    expect(cardHeads.length).toBe(5)
+    expect(cardHeads.every((hEl) => hEl.tagName === 'H4' && hEl.querySelector('a'))).toBe(true)
 
     // The complete index links every manifest node; only dirs carry
     // headings (the navigable map) — files mount as bare anchors.
@@ -137,14 +140,17 @@ describe('ViewDocs — docs portal', () => {
     expect(index).toBeTruthy()
     expect(index.querySelector('h2').textContent).toBe(DOCS_STRINGS.INDEX_TITLE)
 
-    // 3 buckets + 13 manifest nodes — all linked.
-    expect(index.querySelectorAll('a').length).toBe(16)
+    // 4 group labels + 15 member/node links — all docs reachable.
+    expect(index.querySelectorAll('a').length).toBe(15)
 
-    const heads = [...index.querySelectorAll('h3, h4, h5')]
+    const heads = [...index.querySelectorAll('h3, h4, h5, h6')]
 
     expect(heads.map((hEl) => hEl.textContent)).toEqual(
       expect.arrayContaining([
-        'Documentation',
+        DOCS_STRINGS.GROUP_DOCS_LABEL,
+        DOCS_STRINGS.GROUP_ARCH_LABEL,
+        DOCS_STRINGS.GROUP_SOURCE_LABEL,
+        DOCS_STRINGS.GROUP_REPORTS_LABEL,
         'Quality Reports',
         'Source Code',
         'architecture',
@@ -154,11 +160,16 @@ describe('ViewDocs — docs portal', () => {
       ])
     )
 
-    // Deep dirs sit one heading level under their parent (h4 → h5);
+    // Group heads carry no link — sections are disclosure-only.
+    const groupHeads = [...index.querySelectorAll('h3')]
+
+    expect(groupHeads.every((hEl) => !hEl.querySelector('a'))).toBe(true)
+
+    // Deep dirs sit one heading level under their parent (h5 → h6);
     // files are anchors under the preceding dir heading, not headings.
     const subHead = heads.find((hEl) => hEl.textContent === 'sub')
 
-    expect(subHead.tagName).toBe('H5')
+    expect(subHead.tagName).toBe('H6')
 
     const fileLink = [...index.querySelectorAll('a')].find((a) => a.textContent === 'website.md')
 
@@ -187,9 +198,10 @@ describe('ViewDocs — docs portal', () => {
 
     expect(pushed.length).toBe(0)
 
-    // Root-bucket links route through the same navigateDocs path.
-    const bucketLink = [...index.querySelectorAll('h3 a')].find(
-      (a) => a.textContent === 'Documentation'
+    // Section-member links (the h4 bucket rows) route through the same
+    // navigateDocs path.
+    const bucketLink = [...index.querySelectorAll('h4 a')].find(
+      (a) => a.textContent === 'Quality Reports'
     )
 
     pushed.length = 0
@@ -197,7 +209,7 @@ describe('ViewDocs — docs portal', () => {
       new MouseEvent(MOUSE_EVENTS.CLICK, { bubbles: true, cancelable: true })
     )
 
-    expect(pushed).toContain('/docs/docs')
+    expect(pushed).toContain('/docs/reports')
 
     pushed.length = 0
     bucketLink.dispatchEvent(
@@ -219,10 +231,30 @@ describe('ViewDocs — docs portal', () => {
     expect(viewerHead.textContent).toBe('ghost/file.md')
   })
 
-  test('root grid renders the three manifest buckets with generated folder art', () => {
-    const cards = view.shadowRoot.querySelectorAll(`.${DOCS_CLASSES.DOCS_CARD}`)
+  test('root grid sections member cards under the four group headings', () => {
+    const grid = view.shadowRoot.querySelector(`.${DOCS_CLASSES.DOCS_GRID}`)
+    const sections = [...grid.querySelectorAll(`.${DOCS_CLASSES.DOCS_GRID_GROUP}`)]
 
-    expect(cards.length).toBe(3)
+    // Four sections — Docs / Architecture / Source / Reports — each
+    // labelled by a real h3 so heading maps enumerate the grouping.
+    expect(sections.length).toBe(4)
+    expect(
+      [...grid.querySelectorAll(`.${DOCS_CLASSES.DOCS_GRID_GROUP_HEAD}`)].map(
+        (hEl) => hEl.textContent
+      )
+    ).toEqual([
+      DOCS_STRINGS.GROUP_DOCS_LABEL,
+      DOCS_STRINGS.GROUP_ARCH_LABEL,
+      DOCS_STRINGS.GROUP_SOURCE_LABEL,
+      DOCS_STRINGS.GROUP_REPORTS_LABEL,
+    ])
+    expect(sections.every((s) => s.getAttribute('aria-label'))).toBe(true)
+
+    const cards = grid.querySelectorAll(`.${DOCS_CLASSES.DOCS_CARD}`)
+
+    // docs children minus architecture (2) + architecture (1) + src
+    // root + reports root — the mock manifest's member surface.
+    expect(cards.length).toBe(5)
     expect(cards[0].querySelector(`.${DOCS_CLASSES.DOCS_CARD_ART} svg`)).toBeTruthy()
   })
 
@@ -237,15 +269,76 @@ describe('ViewDocs — docs portal', () => {
   })
 
   test('pickNode on a dir expands it and navigates', async () => {
-    const dir = view.rootsAsNodes()[0]
+    // Source Code group → 'src' member — a real routed dir node.
+    const srcRoot = view.rootsAsNodes()[2].children[0]
 
-    view.pickNode(dir)
+    view.pickNode(srcRoot)
     await flush()
 
-    expect(pushed).toContain(`${ROUTE_PATHS.DOCS}/docs`)
-    expect(view.isDirOpen('docs')).toBe(true)
+    expect(pushed).toContain(`${ROUTE_PATHS.DOCS}/src`)
+    expect(view.isDirOpen('src')).toBe(true)
     expect(view.node?.type).toBe('dir')
-    expect(view.node?.name).toBe('Documentation')
+    expect(view.node?.name).toBe('Source Code')
+  })
+
+  test('section-group tree rows toggle disclosure without navigating', async () => {
+    const items = [...view.shadowRoot.querySelectorAll(`.${DOCS_CLASSES.DOCS_TREE_ITEM}`)]
+    const groupRows = items.filter((el) =>
+      el.getAttribute(DATA_ATTRS.DATA_PATH)?.startsWith(DOCS_STRINGS.GROUP_PATH_PREFIX)
+    )
+
+    // Four section rows — disclosure-only buttons (role=treeitem), not
+    // anchors: a section has no docs route to link to.
+    expect(groupRows.length).toBe(4)
+    expect(
+      groupRows.every((el) => el.tagName === 'BUTTON' && el.getAttribute('role') === 'treeitem')
+    ).toBe(true)
+    expect(groupRows.every((el) => el.getAttribute('aria-expanded') === 'true')).toBe(true)
+
+    pushed.length = 0
+    groupRows[0].click()
+    await flush()
+
+    expect(pushed).toHaveLength(0)
+    expect(view.isDirOpen(`${DOCS_STRINGS.GROUP_PATH_PREFIX}docs`)).toBe(false)
+
+    // Re-query — the collapsed row re-renders with aria-expanded false.
+    const collapsed = view.shadowRoot.querySelector(
+      `.${DOCS_CLASSES.DOCS_TREE_ITEM}[${DATA_ATTRS.DATA_PATH}="${DOCS_STRINGS.GROUP_PATH_PREFIX}docs"]`
+    )
+
+    expect(collapsed.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  test('routed member auto-opens its section row; Arrow-Left climbs to it', async () => {
+    globalThis.fetch = jest.fn(async () => ({ ok: false, json: async () => null }))
+
+    view.onRouteParamChange({ params: { docsPath: 'src/App.tsx' } })
+    await flush()
+
+    // 'src' sits under group/source — the section row opens with the route.
+    expect(view.isDirOpen(`${DOCS_STRINGS.GROUP_PATH_PREFIX}source`)).toBe(true)
+
+    const items = [...view.shadowRoot.querySelectorAll(`.${DOCS_CLASSES.DOCS_TREE_ITEM}`)]
+    // A CLOSED member row — ← on an open dir collapses instead of climbing.
+    const memberRow = items.find((el) => el.getAttribute(DATA_ATTRS.DATA_PATH) === 'reports')
+    const groupRow = items.find(
+      (el) => el.getAttribute(DATA_ATTRS.DATA_PATH) === `${DOCS_STRINGS.GROUP_PATH_PREFIX}reports`
+    )
+    const focusSpy = jest.spyOn(groupRow, 'focus')
+
+    memberRow.dispatchEvent(
+      new KeyboardEvent(KEYBOARD_EVENTS.KEYDOWN, {
+        key: KEYS.ARROW_LEFT,
+        bubbles: true,
+        cancelable: true,
+      })
+    )
+
+    // 'reports' has no rendered path parent — the climb lands on its section row.
+    expect(focusSpy).toHaveBeenCalled()
+
+    focusSpy.mockRestore()
   })
 
   test('crumb input shows / at the portal root', () => {
@@ -255,42 +348,45 @@ describe('ViewDocs — docs portal', () => {
   })
 
   test('re-clicking an open tree dir collapses it; inside → back to parent', async () => {
-    const treeBtns = () => view.shadowRoot.querySelectorAll(`.${DOCS_CLASSES.DOCS_TREE_ITEM}`)
+    const rowFor = (path) =>
+      [...view.shadowRoot.querySelectorAll(`.${DOCS_CLASSES.DOCS_TREE_ITEM}`)].find(
+        (el) => el.getAttribute(DATA_ATTRS.DATA_PATH) === path
+      )
 
-    treeBtns()[0].click() // open + navigate into 'docs'
+    rowFor('src').click() // open + navigate into 'src'
     await flush()
 
-    expect(view.isDirOpen('docs')).toBe(true)
-    expect(view.docsPath).toBe('docs')
+    expect(view.isDirOpen('src')).toBe(true)
+    expect(view.docsPath).toBe('src')
 
-    treeBtns()[0].click() // re-click collapses — and leaves the folder
+    rowFor('src').click() // re-click collapses — and leaves the folder
     await flush()
 
-    expect(view.isDirOpen('docs')).toBe(false)
+    expect(view.isDirOpen('src')).toBe(false)
     expect(pushed).toContain(ROUTE_PATHS.DOCS)
     expect(view.docsPath).toBe(CHAR_STRINGS.EMPTY)
   })
 
   test('re-clicking an open non-current dir collapses without navigating', async () => {
-    const dir = view.rootsAsNodes()[0]
+    const dir = view.rootsAsNodes()[0].children[0] // 'docs/sassdoc' member
 
     view.pickTreeNode(dir)
     await flush()
 
-    expect(view.isDirOpen('docs')).toBe(true)
+    expect(view.isDirOpen('docs/sassdoc')).toBe(true)
 
     pushed.length = 0
 
-    // Open 'reports' so the viewer sits outside 'docs' — collapsing it
-    // must not yank the page back.
-    view.pickNode(view.rootsAsNodes()[1])
+    // Open 'src' so the viewer sits outside the docs section —
+    // collapsing it must not yank the page back.
+    view.pickNode(view.rootsAsNodes()[2].children[0])
     await flush()
 
     view.pickTreeNode(dir)
     await flush()
 
-    expect(view.isDirOpen('docs')).toBe(false)
-    expect(view.docsPath).toBe('reports')
+    expect(view.isDirOpen('docs/sassdoc')).toBe(false)
+    expect(view.docsPath).toBe('src')
   })
 
   test('a dir with index.html auto-opens the index (except under src)', async () => {
@@ -415,12 +511,13 @@ describe('ViewDocs — docs portal', () => {
   })
 
   test('navigating into a dir renders its children in the grid', async () => {
-    view.pickNode(view.rootsAsNodes()[0])
+    // Architecture section → 'docs/architecture' member (website.md only).
+    view.pickNode(view.rootsAsNodes()[1].children[0])
     await flush()
 
     const cards = view.shadowRoot.querySelectorAll(`.${DOCS_CLASSES.DOCS_CARD}`)
 
-    expect(cards.length).toBe(3)
+    expect(cards.length).toBe(1)
   })
 
   test('navigating to a file fetches its payload and paints the viewer', async () => {
@@ -559,6 +656,16 @@ describe('ViewDocs — docs portal', () => {
     expect(pushed).toContain(`${ROUTE_PATHS.DOCS}/src`)
   })
 
+  test('closeFile before any path resolves climbs to the portal root', async () => {
+    // node is null until a docsPath resolves — the optional chain must
+    // short-circuit to a plain climb, not throw. Run synchronously after
+    // mount so no store emission can re-apply a resolved route first.
+    view.closeFile()
+    await flush()
+
+    expect(pushed).toContain(ROUTE_PATHS.DOCS)
+  })
+
   test('editable breadcrumb: Enter commits the typed path, Escape restores', async () => {
     const input = view.shadowRoot.querySelector(`.${DOCS_CLASSES.DOCS_CRUMB_EDIT}`)
 
@@ -591,21 +698,25 @@ describe('ViewDocs — docs portal', () => {
   })
 
   test('tree buttons expand + navigate; file buttons navigate', async () => {
-    const treeBtns = view.shadowRoot.querySelectorAll(`.${DOCS_CLASSES.DOCS_TREE_ITEM}`)
+    const srcRow = [...view.shadowRoot.querySelectorAll(`.${DOCS_CLASSES.DOCS_TREE_ITEM}`)].find(
+      (el) => el.getAttribute(DATA_ATTRS.DATA_PATH) === 'src'
+    )
 
-    treeBtns[0].click()
+    srcRow.click()
     await flush()
 
     expect(pushed.length).toBeGreaterThan(0)
   })
 
   test('grid card click navigates into the node', async () => {
-    const card = view.shadowRoot.querySelector(`.${DOCS_CLASSES.DOCS_CARD}`)
+    const card = [...view.shadowRoot.querySelectorAll(`.${DOCS_CLASSES.DOCS_CARD}`)].find(
+      (el) => el.getAttribute(DATA_ATTRS.DATA_PATH) === 'src'
+    )
 
     card.click()
     await flush()
 
-    expect(pushed).toContain(`${ROUTE_PATHS.DOCS}/docs`)
+    expect(pushed).toContain(`${ROUTE_PATHS.DOCS}/src`)
   })
 
   test('root crumb button returns to the portal root', async () => {
@@ -825,23 +936,24 @@ describe('ViewDocs — docs portal', () => {
   })
 
   test('treeview arrow keys move focus and expand/collapse dirs in place', async () => {
-    const items = () => view.shadowRoot.querySelectorAll(`.${DOCS_CLASSES.DOCS_TREE_ITEM}`)
+    const items = () => [...view.shadowRoot.querySelectorAll(`.${DOCS_CLASSES.DOCS_TREE_ITEM}`)]
+    const rowFor = (path) => items().find((el) => el.getAttribute(DATA_ATTRS.DATA_PATH) === path)
 
-    const first = items()[0] // 'docs' bucket — closed dir
+    const srcRow = rowFor('src') // closed dir under the Source section
 
-    first.focus()
+    srcRow.focus()
 
     // → on a closed dir expands in place (no navigation).
-    first.dispatchEvent(
+    srcRow.dispatchEvent(
       new KeyboardEvent(KEYBOARD_EVENTS.KEYDOWN, { key: KEYS.ARROW_RIGHT, bubbles: true })
     )
     await flush()
 
-    expect(view.isDirOpen('docs')).toBe(true)
+    expect(view.isDirOpen('src')).toBe(true)
     expect(pushed.length).toBe(0)
 
     // Focus was restored to the expanded row after re-render.
-    const reopened = items()[0]
+    const reopened = rowFor('src')
 
     expect(reopened.getAttribute('aria-expanded')).toBe('true')
 
@@ -851,38 +963,44 @@ describe('ViewDocs — docs portal', () => {
     )
     await flush()
 
-    expect(view.shadowRoot.activeElement).toBe(items()[1])
+    const firstChild = rowFor('src/App.tsx')
+
+    expect(view.shadowRoot.activeElement).toBe(firstChild)
 
     // ↑ returns to the parent row.
-    items()[1].dispatchEvent(
+    firstChild.dispatchEvent(
       new KeyboardEvent(KEYBOARD_EVENTS.KEYDOWN, { key: KEYS.ARROW_UP, bubbles: true })
     )
     await flush()
 
-    expect(view.shadowRoot.activeElement).toBe(items()[0])
+    expect(view.shadowRoot.activeElement).toBe(rowFor('src'))
 
     // ← on an open dir collapses it in place.
-    items()[0].dispatchEvent(
+    rowFor('src').dispatchEvent(
       new KeyboardEvent(KEYBOARD_EVENTS.KEYDOWN, { key: KEYS.ARROW_LEFT, bubbles: true })
     )
     await flush()
 
-    expect(view.isDirOpen('docs')).toBe(false)
+    expect(view.isDirOpen('src')).toBe(false)
   })
 
   test('← on a child row focuses its parent dir', async () => {
-    view.pickNode(view.rootsAsNodes()[0]) // expand + navigate into 'docs'
+    // pickNode expands 'docs/architecture' itself — route-apply only
+    // opens ancestors, so the child row needs the dir open.
+    view.pickNode(view.rootsAsNodes()[1].children[0])
     await flush()
 
-    const items = view.shadowRoot.querySelectorAll(`.${DOCS_CLASSES.DOCS_TREE_ITEM}`)
-    const child = items[1] // first child under the open 'docs' dir
+    const items = () => [...view.shadowRoot.querySelectorAll(`.${DOCS_CLASSES.DOCS_TREE_ITEM}`)]
+    const rowFor = (path) => items().find((el) => el.getAttribute(DATA_ATTRS.DATA_PATH) === path)
 
-    child.dispatchEvent(
+    // 'docs/architecture' renders open under the Architecture section —
+    // its website.md child climbs to it on ←.
+    rowFor('docs/architecture/website.md').dispatchEvent(
       new KeyboardEvent(KEYBOARD_EVENTS.KEYDOWN, { key: KEYS.ARROW_LEFT, bubbles: true })
     )
     await flush()
 
-    expect(view.shadowRoot.activeElement).toBe(items[0])
+    expect(view.shadowRoot.activeElement).toBe(rowFor('docs/architecture'))
   })
 
   test('grid arrow keys rove between cards', async () => {
@@ -926,30 +1044,34 @@ describe('ViewDocs — docs portal', () => {
   })
 
   test('re-clicking an open dir collapses it — inside subtree navigates to parent', async () => {
-    const docsDir = view.rootsAsNodes()[0]
+    const srcDir = view.rootsAsNodes()[2].children[0] // Source section → 'src'
 
-    view.pickNode(docsDir) // open + land inside 'docs'
+    view.pickNode(srcDir) // open + land inside 'src'
     await flush()
 
     pushed.length = 0
 
-    view.pickTreeNode(docsDir) // docsPath === node.path → parent nav
+    view.pickTreeNode(srcDir) // docsPath === node.path → parent nav
 
-    expect(view.isDirOpen('docs')).toBe(false)
+    expect(view.isDirOpen('src')).toBe(false)
     expect(pushed).toContain(ROUTE_PATHS.DOCS)
   })
 
   test('re-clicking an open dir from a nested path still collapses to parent', async () => {
-    view.onRouteParamChange({ params: { docsPath: 'docs/sassdoc' } })
+    // Viewer sits INSIDE 'docs/architecture' (a nested file) — the dir is
+    // an ancestor, so re-clicking it collapses to its parent segment.
+    view.onRouteParamChange({ params: { docsPath: 'docs/architecture/website.md' } })
     await flush()
     await flush()
 
     pushed.length = 0
 
-    view.pickTreeNode(view.rootsAsNodes()[0]) // startsWith('docs/') → inside
+    const archDir = view.rootsAsNodes()[1].children[0] // Architecture → 'docs/architecture'
 
-    expect(view.isDirOpen('docs')).toBe(false)
-    expect(pushed).toContain(ROUTE_PATHS.DOCS)
+    view.pickTreeNode(archDir) // docsPath startsWith('docs/architecture/') → inside
+
+    expect(view.isDirOpen('docs/architecture')).toBe(false)
+    expect(pushed).toContain(`${ROUTE_PATHS.DOCS}/docs`)
   })
 
   test('re-clicking an open dir while outside it only re-renders (no nav)', async () => {
@@ -957,24 +1079,28 @@ describe('ViewDocs — docs portal', () => {
     await flush()
     await flush()
 
-    view.toggleDir('docs') // open in place without navigating
+    view.toggleDir('docs/sassdoc') // open in place without navigating
 
     pushed.length = 0
 
-    view.pickTreeNode(view.rootsAsNodes()[0])
+    const sassdoc = view.rootsAsNodes()[0].children[0] // Docs section → 'docs/sassdoc'
 
-    expect(view.isDirOpen('docs')).toBe(false)
+    view.pickTreeNode(sassdoc)
+
+    expect(view.isDirOpen('docs/sassdoc')).toBe(false)
     expect(pushed.length).toBe(0)
   })
 
-  test('keydowns on the nav container (not a row) are ignored', () => {
-    const nav = view.shadowRoot.querySelector(`.${DOCS_CLASSES.DOCS_NAV}`)
+  test('keydowns on the tree container (not a row) are ignored', () => {
+    // The keydown listener lives on the <ul> — a keydown landing on the
+    // list itself (not a treeitem row) must hit the idx<0 early return.
+    const tree = view.shadowRoot.querySelector(`.${DOCS_CLASSES.DOCS_TREE}`)
 
-    nav.dispatchEvent(
+    tree.dispatchEvent(
       new KeyboardEvent(KEYBOARD_EVENTS.KEYDOWN, { key: KEYS.ARROW_DOWN, bubbles: true })
     )
 
-    expect(view.shadowRoot.activeElement).not.toBe(nav)
+    expect(view.shadowRoot.activeElement).not.toBe(tree)
   })
 
   test('↓ moves to the next tree row; non-arrow keys fall through untouched', async () => {
@@ -1005,12 +1131,12 @@ describe('ViewDocs — docs portal', () => {
   })
 
   test('→ on a file tree row focuses the next row', async () => {
-    view.pickNode(view.rootsAsNodes()[0])
+    view.pickNode(view.rootsAsNodes()[2].children[0]) // open + navigate 'src'
     await flush()
 
     const items = () => view.shadowRoot.querySelectorAll(`.${DOCS_CLASSES.DOCS_TREE_ITEM}`)
 
-    // 'docs/sassdoc' rows are dirs; find the first file row (no aria-expanded).
+    // Under the open 'src' dir the file rows carry no aria-expanded.
     const fileRow = [...items()].find((b) => !b.hasAttribute('aria-expanded'))
 
     fileRow.dispatchEvent(

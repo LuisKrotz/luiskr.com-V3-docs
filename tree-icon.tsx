@@ -243,7 +243,9 @@ const paperSheet = (seed: number, i: number, open: boolean, top: boolean): SVGEl
 
   if (!open) {
     // Peeking page top — only the rounded upper edge reads above the
-    // body, so the stack sells "contains documents" at a glance.
+    // body, so the stack sells "contains documents" at a glance. The
+    // front sheet carries the same slow bob the open fan plays, so a
+    // closed folder is alive like every other glyph in the pack.
     return (
       <rect
         className={DOCS_CLASSES.DOCS_TREE_PAPER}
@@ -252,29 +254,42 @@ const paperSheet = (seed: number, i: number, open: boolean, top: boolean): SVGEl
         width={fx(10.8 - i * 0.45)}
         height="1.5"
         rx="0.7"
-      />
+      >
+        {top ? (
+          <animateTransform
+            attributeName="transform"
+            type="translate"
+            values="0 0;0 -0.4;0 0"
+            dur={`${(3.6 + (seed % 30) / 10).toFixed(1)}s`}
+            repeatCount="indefinite"
+          />
+        ) : null}
+      </rect>
     ) as SVGElement
   }
 
-  const x = 7 + i * 0.8 + tilt * 0.15
+  // Open pose — the reference pack's "folder with files" is a pair of
+  // thin pages leaning modestly out of the mouth in the folder's OWN
+  // ink, not a rainbow fan: gentle tilts, tops only ~5 units over the
+  // back plate, bottoms hidden behind the swung-forward flap. The
+  // front sheet carries the same slow bob the closed peek plays.
+  const x = 8.4 + i * 2.1 + tilt * 0.15
 
-  const y = 5.9 - i * 0.45
+  const y = 4.6 - i * 0.9
 
-  const w = 10.4 - i * 0.4
+  const w = 7.6 - i * 0.5
 
-  const fan = -11 + i * 7.5 + tilt
+  const fan = -6 + i * 7 + tilt * 0.4
 
   return (
     <g transform={`rotate(${fan.toFixed(1)} ${(x + w / 2).toFixed(1)} 13.2)`}>
       <rect
-        className={`${DOCS_CLASSES.DOCS_TREE_PAPER} ${
-          DOCS_CLASSES.DOCS_TREE_PAPER_TONES[i % DOCS_CLASSES.DOCS_TREE_PAPER_TONES.length]
-        }`}
+        className={DOCS_CLASSES.DOCS_TREE_PAPER}
         x={fx(x)}
         y={fx(y)}
         width={fx(w)}
-        height="9.4"
-        rx="0.8"
+        height="9.2"
+        rx="0.7"
       />
       {top ? (
         <animateTransform
@@ -302,7 +317,7 @@ const FOLDER_BODY_CLOSED =
   'M3.4 19 L3.4 8.6 Q3.4 7.4 4.6 7.4 L9.2 7.4 L11.4 9.4 L19.4 9.4 Q20.6 9.4 20.6 10.6 L20.6 17.8 Q20.6 19 19.4 19 Z'
 
 const FOLDER_BODY_OPEN =
-  'M3.4 12.6 L3.4 8.6 Q3.4 7.4 4.6 7.4 L9.2 7.4 L11.4 9.4 L19.4 9.4 Q20.6 9.4 20.6 10.6 L20.6 12.6 Z'
+  'M3.4 19 L3.4 8.6 Q3.4 7.4 4.6 7.4 L9.2 7.4 L11.4 9.4 L19.4 9.4 Q20.6 9.4 20.6 10.6 L20.6 19 Z'
 
 const FOLDER_FLAP_OPEN = 'M5 12.7 L19.6 12.7 L22.4 19.4 L1.6 19.4 Z'
 

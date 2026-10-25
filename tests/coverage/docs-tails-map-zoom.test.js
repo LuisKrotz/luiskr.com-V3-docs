@@ -16,6 +16,7 @@ import { ROUTE_NAMES } from '@core/tokens/routes/names.js'
 import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
 import { PREF_CLASSES } from '@core/tokens/classes/preferences.js'
 import { DOCS_IDS } from '@core/tokens/ids/docs.js'
+import { ARIA_ATTRS } from '@core/tokens/attrs/aria.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 import { KEYS } from '@core/tokens/primitives.js'
 
@@ -203,6 +204,39 @@ describe('ViewDocs — architecture map zoom + pause wiring', () => {
     await flush()
 
     expect(view._mapZoomed).toBe(false)
+  })
+
+  test('aria-controls only points at the modal id while the dialog exists', async () => {
+    const $ = (sel) => view.shadowRoot.querySelector(sel)
+    const zoom = $(`.${DOCS_CLASSES.DOCS_MAP_ZOOM}`)
+
+    // aria_id_unique — a controls pointer at a not-yet-rendered id is
+    // invalid; closed, the trigger carries no controls target at all.
+    expect(zoom.getAttribute(ARIA_ATTRS.ARIA_CONTROLS)).toBe(null)
+    expect($(`#${DOCS_IDS.MAP_MODAL}`)).toBeFalsy()
+
+    view.openMapZoom()
+    await flush()
+
+    // Open, the dialog exists and the pointer resolves to its id
+    // (re-query — the state flip re-renders the chrome).
+    expect($(`.${DOCS_CLASSES.DOCS_MAP_ZOOM}`).getAttribute(ARIA_ATTRS.ARIA_CONTROLS)).toBe(
+      DOCS_IDS.MAP_MODAL
+    )
+    expect($(`#${DOCS_IDS.MAP_MODAL}`)).toBeTruthy()
+  })
+
+  test('the map landmark names itself from the visible label element', () => {
+    const $ = (sel) => view.shadowRoot.querySelector(sel)
+
+    // aria_complementary_label_visible — the aside's accessible name
+    // comes from rendered text (the hint chip), not an invisible label.
+    const aside = $(`.${DOCS_CLASSES.DOCS_MAP}`)
+    const labelEl = $(`#${DOCS_IDS.MAP_LABEL}`)
+
+    expect(aside.getAttribute(ARIA_ATTRS.ARIA_LABELLEDBY)).toBe(DOCS_IDS.MAP_LABEL)
+    expect(labelEl).toBeTruthy()
+    expect(labelEl.textContent.trim().length).toBeGreaterThan(0)
   })
 
   test('no matchMedia leaves _mapMq unset and keeps the scene unpaused', () => {

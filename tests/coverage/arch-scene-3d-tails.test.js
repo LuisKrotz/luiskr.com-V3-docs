@@ -47,7 +47,8 @@ jest.unstable_mockModule('@core/utils/gpu/orbit-controller.js', () => ({
 
 const { mountArchScene3d, parseInk, poseFromPos, buildEdges } =
   await import('@docs/arch-scene-3d.js')
-const { mountArchScene, placeRoots, computePositions } = await import('@docs/arch-scene.js')
+const { mountArchScene, placeRoots, computePositions, graphFit } =
+  await import('@docs/arch-scene.js')
 
 /* ── Fixture tree ─────────────────────────────────────────────── */
 
@@ -241,23 +242,42 @@ describe('arch-scene-3d helpers', () => {
       { node: { type: 'dir', name: 'd', path: 'd' }, depth: 1, angle: 0, parent: 0 },
     ]
     // Edge a→b horizontal, a→c coincident (skipped), a→d vertical (the
-    // degenerate cross(dir,+Y) arm).
-    const positions = new Float32Array([0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 5, 0])
+    // degenerate cross(dir,+Y) arm). Distances clear both glyph bounds
+    // + SCENE_EDGE_GAP so clipEdge keeps them.
+    const positions = new Float32Array([0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 14, 0])
+    const scale = new Float32Array([1, 1, 1, 1])
 
-    const e = buildEdges(placed, positions)
+    const e = buildEdges(placed, positions, scale)
 
-    // b + d edges only: 8 verts, 12 indices each → 16 verts, 24 idx.
+    // b + d edges only: 8 verts, 12 indices each → 16 verts, 24 idx —
+    // and each clipped endpoint sits clear of its glyph center by the
+    // bound + gap (the a-end pulls back from the origin node).
     expect(e.pos.length).toBe(16 * 3)
     expect(e.idx.length).toBe(24)
     expect(e.nrm.length).toBe(16 * 3)
     expect(e.uv.length).toBe(16 * 2)
+    expect(e.pos[0]).toBeGreaterThan(0)
 
     // NaN positions survive the len guard (NaN < 1e-6 is false) and
     // propagate into the cross products — `ql || 1` keeps the second
     // perpendicular finite instead of producing NaN geometry.
-    const nan = buildEdges(placed.slice(0, 2), new Float32Array([0, 0, 0, NaN, NaN, NaN]))
+    const nan = buildEdges(
+      placed.slice(0, 2),
+      new Float32Array([0, 0, 0, NaN, NaN, NaN]),
+      new Float32Array([1, 1])
+    )
 
     expect(nan.idx.length).toBe(12)
+
+    // An over-close pair — centers nearer than the two glyph bounds +
+    // gaps — drops the whole edge instead of drawing inside the faces.
+    const close = buildEdges(
+      placed.slice(0, 2),
+      new Float32Array([0, 0, 0, 0.5, 0, 0]),
+      new Float32Array([1, 1])
+    )
+
+    expect(close.idx.length).toBe(0)
   })
 })
 
@@ -456,19 +476,20 @@ describe('arch-scene-3d mount', () => {
 
       const placed = placeRoots(ROOTS)
       const idx = placed.findIndex((p) => p.node.path === 'docs/architecture')
-      const xyz = await computePositions(placed)
+      const { xyz } = await computePositions(placed)
+      const { camDist } = graphFit(placed)
+      const dist0 = camDist * Math.hypot(1, DOCS_UNITS.SCENE_CAMERA_LIFT)
+      const wantDist = Math.min(
+        dist0,
+        DOCS_UNITS.SCENE_FOCUS_MIN + placed[idx].depth * DOCS_UNITS.SCENE_FOCUS_STEP
+      )
 
       expect(Math.abs(mockCtl.tx - xyz[idx * 3])).toBeLessThan(0.5)
       expect(
         Math.abs(mockCtl.ty - (xyz[idx * 3 + 1] + DOCS_UNITS.SCENE_FOCUS_Y_BIAS))
       ).toBeLessThan(0.5)
       expect(Math.abs(mockCtl.tz - xyz[idx * 3 + 2])).toBeLessThan(0.5)
-      expect(
-        Math.abs(
-          mockCtl.distance -
-            (DOCS_UNITS.SCENE_FOCUS_MIN + placed[idx].depth * DOCS_UNITS.SCENE_FOCUS_STEP)
-        )
-      ).toBeLessThan(0.5)
+      expect(Math.abs(mockCtl.distance - wantDist)).toBeLessThan(0.5)
 
       // Disengaged — a later tick takes the focus.on-false arm and
       // leaves every rig field untouched.
@@ -572,7 +593,7 @@ describe('arch-scene-3d mount', () => {
     handle.destroy()
   })
 
-  test('pick misses all spheres, inside-origin candidates drop, and the portal root never navigates', async () => {
+  test('pick misses all spheres, inside-origin resolves the exit surface, and the portal root never navigates', async () => {
     const onPick = jest.fn()
 
     const handle = await mountArchScene3d(canvas, ROOTS, onPick)
@@ -586,14 +607,18 @@ describe('arch-scene-3d mount', () => {
 
     expect(onPick).not.toHaveBeenCalled()
 
-    // Origin inside a sphere → t < 0 → `t > 0 && t < bestT` false arm.
+    // Origin inside a sphere → the near root is negative and the hit
+    // lands on the exit surface (orbit-proportioned glyphs can contain
+    // the camera inside their own cluster) → the node's path resolves.
     const [, x, y, z] = mockSurface.calls.positions[1]
 
     mockSurface.ray = [x, y, z, 0, 0, 1]
 
     canvas.dispatchEvent(new MouseEvent('click', { clientX: 5, clientY: 5, bubbles: true }))
 
-    expect(onPick).not.toHaveBeenCalled()
+    expect(onPick).toHaveBeenCalledWith('docs')
+
+    onPick.mockClear()
 
     // The synthetic portal root carries path '' — a hit resolves but
     // `if (path)` keeps onPick quiet.
@@ -638,6 +663,10 @@ describe('arch-scene-3d mount', () => {
 
       // update-false arm: no orbit write this tick; label-fade arm:
       // distance 0 reveals every label → a=1 ≠ l.a=0 → set_color writes.
+      // The focus glide (armed by buildGraph's startFocus) lerps the
+      // rig distance back toward dist0 each tick — a control-start
+      // disengages it first so d=0 actually reaches the fade probe.
+      mockCtl.fire(ORBIT_EVENTS.START)
       mockCtl.moved = false
       mockCtl.distance = 0
 
