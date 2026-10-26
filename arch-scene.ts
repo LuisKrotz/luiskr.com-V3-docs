@@ -1735,13 +1735,14 @@ export const mountArchSceneThree = (
       if (parent < 0) return
 
       const isDir = node.type !== 'file'
-      const pIsDir = placed[parent].node.type !== 'file'
 
       const seg = clipEdge(
         [positions[i].x, positions[i].y, positions[i].z],
         [positions[parent].x, positions[parent].y, positions[parent].z],
         (isDir ? dirBound : fileBound) * (scale[i] as number),
-        (pIsDir ? dirBound : fileBound) * (scale[parent] as number)
+        // Parents are never files — leaves have no children — so the
+        // parent's trim radius is always the dir bound.
+        dirBound * (scale[parent] as number)
       )
 
       if (!seg) return

@@ -267,7 +267,7 @@ function* indexEntries(groups: DocsNode[]): Generator<HTMLElement> {
   for (const group of groups) {
     yield h(HTML_TAGS.H3, null, group.name) as HTMLElement
 
-    yield* indexNodes(group.children ?? [], 1)
+    yield* indexNodes(group.children as DocsNode[], 1)
   }
 }
 
@@ -612,7 +612,7 @@ export const renderDocs = (view: ViewDocs) => {
                       {/* h3 group head → h4 cards keeps the heading ladder
                           honest under the h2 region label. */}
                       <h3 className={DOCS_CLASSES.DOCS_GRID_GROUP_HEAD}>{g.name}</h3>
-                      {gridCards(view, g.children ?? [], HTML_PHRASING_TAGS.H4)}
+                      {gridCards(view, g.children as DocsNode[], HTML_PHRASING_TAGS.H4)}
                     </section>
                   ))}
                 </div>

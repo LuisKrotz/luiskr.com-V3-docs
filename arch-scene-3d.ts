@@ -313,13 +313,14 @@ export const buildEdges = (
     if (parent < 0) return
 
     const isDir = node.type !== 'file'
-    const pIsDir = placed[parent].node.type !== 'file'
 
     const seg = clipEdge(
       [positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]],
       [positions[parent * 3], positions[parent * 3 + 1], positions[parent * 3 + 2]],
       (isDir ? dirBound : fileBound) * (scale[i] as number),
-      (pIsDir ? dirBound : fileBound) * (scale[parent] as number)
+      // Parents are never files — leaves have no children — so the
+      // parent's trim radius is always the dir bound.
+      dirBound * (scale[parent] as number)
     )
 
     if (!seg) return

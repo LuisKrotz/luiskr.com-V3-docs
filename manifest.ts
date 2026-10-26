@@ -35,6 +35,14 @@ export interface DocsNode {
   group?: boolean
 }
 
+/** A view-synthesized section node — `buildGroups` always supplies the
+ *  children array and flags the node `group: true`, so the section type
+ *  narrows both fields required for scene/tree consumers. */
+export interface DocsGroup extends DocsNode {
+  children: DocsNode[]
+  group: true
+}
+
 /** A publishable root bucket (docs / reports / coverage-* / source modules). */
 export interface DocsRoot {
   root: string
@@ -136,7 +144,7 @@ export const getDocsManifest = (): DocsManifest => _manifest
 const _groupParents = new Map<string, string>()
 
 /** Memoized section nodes — the manifest is static per build. */
-let _groups: DocsNode[] | null = null
+let _groups: DocsGroup[] | null = null
 
 /**
  * Builds the four portal section nodes. The docs root's children flatten
@@ -147,7 +155,7 @@ let _groups: DocsNode[] | null = null
  * every member carries its real path, so /docs/<path> URLs never change.
  * @returns Ordered section nodes (empty sections dropped).
  */
-const buildGroups = (): DocsNode[] => {
+const buildGroups = (): DocsGroup[] => {
   const rootNode = (r: DocsRoot): DocsNode => ({
     type: 'dir',
     name: r.label,
@@ -182,7 +190,7 @@ const buildGroups = (): DocsNode[] => {
     ],
   ]
 
-  const groups: DocsNode[] = []
+  const groups: DocsGroup[] = []
 
   for (const [path, name, children] of defs) {
     if (!children.length) continue
@@ -203,7 +211,7 @@ const buildGroups = (): DocsNode[] => {
  * changes after hydration.
  * @returns Ordered section dir-nodes flagged `group: true`.
  */
-export const docsGroups = (): DocsNode[] => {
+export const docsGroups = (): DocsGroup[] => {
   _groups ??= buildGroups()
 
   return _groups

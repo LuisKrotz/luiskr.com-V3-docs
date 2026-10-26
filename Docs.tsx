@@ -775,14 +775,14 @@ export class ViewDocs extends BaseComponent {
     const inScene = groups.some(
       (g) =>
         g.path === path ||
-        (g.children ?? []).some((c) => c.path === path) ||
+        g.children?.some((c) => c.path === path) ||
         !(getDocsManifest().roots as Array<{ root: string }>).some((r) => r.root === path)
     )
 
     if (inScene) return path
 
     const owner = groups.find((g) =>
-      (g.children ?? []).some((c) => c.path.startsWith(`${path}${CHAR_STRINGS.SLASH}`))
+      g.children?.some((c) => c.path.startsWith(`${path}${CHAR_STRINGS.SLASH}`))
     )
 
     return owner?.path ?? path
@@ -804,7 +804,7 @@ export class ViewDocs extends BaseComponent {
       // The scene's top ring IS the portal's four sections — the map
       // reads Source Code / Documentation / Architecture / Reports as
       // separated clusters instead of a flat 19-bucket fan.
-      docsGroups().map((g) => ({ root: g.path, label: g.name, children: g.children ?? [] })),
+      docsGroups().map((g) => ({ root: g.path, label: g.name, children: g.children })),
       (path) => {
         // Section-group paths aren't routable — picking one does
         // nothing beyond the highlight pass (mirrors pickNode).

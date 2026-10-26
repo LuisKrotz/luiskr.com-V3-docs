@@ -416,6 +416,29 @@ describe('docs architecture scene', () => {
     canvas.remove()
   })
 
+  test('setActive with an unresolvable path takes the activeIdx -1 climb guard', async () => {
+    const canvas = document.createElement(HTML_TAGS.CANVAS)
+
+    document.body.appendChild(canvas)
+
+    const handle = mountArchScene(canvas, ROOTS, jest.fn())
+
+    expect(handle).not.toBe(null)
+
+    await flush()
+
+    // Unresolvable path → resolveScenePath → -1 → the `activeIdx >= 0 ?`
+    // falsy arm of the ancestor climb.
+    handle.setActive('zzz/no-such-path')
+    handle.setActive('docs/README.md')
+
+    await flush()
+
+    handle.destroy()
+
+    canvas.remove()
+  })
+
   test('printcapture repaints a frame and answers with a PNG data URL', () => {
     const canvas = document.createElement(HTML_TAGS.CANVAS)
 

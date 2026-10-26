@@ -374,15 +374,105 @@ describe('arch-scene-3d mount', () => {
     expect(mockCtl.disposed).toBe(true)
   })
 
+  test('setActive with an unresolvable path takes the activeIdx -1 climb guard', async () => {
+    const handle = await mountArchScene3d(canvas, ROOTS, jest.fn())
+
+    expect(handle).not.toBeNull()
+
+    await flush()
+
+    handle.setActive?.('zzz/no-such-path')
+    handle.setActive?.('docs/README.md')
+    handle.setPaused?.(true)
+    handle.setPaused?.(false)
+    handle.resize?.()
+
+    handle.destroy()
+  })
+
+  test('canvas pick covers the ray-miss and root-path guard arms', async () => {
+    const handle = await mountArchScene3d(canvas, ROOTS, jest.fn())
+
+    expect(handle).not.toBeNull()
+
+    await flush()
+
+    // A click anywhere on the canvas exercises the pick path — a corner
+    // miss takes `best < 0`, a center ray lands on the path-less root hub
+    // (`pickables[best].path === ''` → the `if (path)` else arm). The
+    // pointerdown sets the drag-slop baseline before each click.
+    for (const [x, y] of [
+      [1, 1],
+      [300, 200],
+    ]) {
+      canvas.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: x, clientY: y }))
+      canvas.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: x, clientY: y }))
+    }
+
+    // A ray that misses every pickable → `best < 0` → the `if (best >= 0)`
+    // else arm.
+    const savedRay = mockSurface.ray
+
+    mockSurface.ray = [0, 0, 10, 0, 1, 0]
+    canvas.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 1, clientY: 1 }))
+    canvas.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 1, clientY: 1 }))
+
+    // A ray through TWO pickables → the second hit's `t >= bestT` takes
+    // the `t > 0 && t < bestT` else arm. The positions the mount uploaded
+    // give the pickable xyz.
+    const pos = mockSurface.calls.positions
+
+    if (pos && pos.length >= 6) {
+      const [ax, ay, az, bx, by, bz] = pos
+      const len = Math.hypot(bx - ax, by - ay, bz - az) || 1
+
+      mockSurface.ray = [
+        ax - (bx - ax),
+        ay - (by - ay),
+        az - (bz - az),
+        (bx - ax) / len,
+        (by - ay) / len,
+        (bz - az) / len,
+      ]
+      canvas.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 1, clientY: 1 }))
+      canvas.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 1, clientY: 1 }))
+    }
+
+    mockSurface.ray = savedRay
+
+    handle.destroy()
+  })
+
+  test('mount takes the faceCss parse arm when --bg-primary resolves', async () => {
+    const origGCS = globalThis.getComputedStyle
+
+    // --bg-primary resolves to a real ink → the `faceCss ?` truthy arm
+    // runs parseInk on it.
+    globalThis.getComputedStyle = (_el) => ({
+      color: 'rgb(20, 20, 20)',
+      getPropertyValue: () => 'rgb(30, 40, 50)',
+    })
+
+    try {
+      const handle = await mountArchScene3d(canvas, ROOTS, jest.fn())
+
+      expect(handle).not.toBeNull()
+
+      handle.destroy()
+    } finally {
+      globalThis.getComputedStyle = origGCS
+    }
+  })
+
   test('resolved probe inks reach the per-node file materials', async () => {
     const origGCS = globalThis.getComputedStyle
 
     // Probe spans resolve --icon-ink to a neon; the canvas keeps the
     // accent. File materials must carry the probed rgb.
-    globalThis.getComputedStyle = (el) => ({
+    globalThis.getComputedStyle = (_el) => ({
       color: 'rgb(0, 255, 255)',
       getPropertyValue: () =>
-        el.tagName === HTML_TAGS.SPAN.toUpperCase() ? 'rgb(247, 223, 30)' : '',
+        _el.tagName === HTML_TAGS.SPAN.toUpperCase() ? 'rgb(247, 223, 30)' : '',
     })
 
     try {
