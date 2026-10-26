@@ -81,26 +81,67 @@ $_B_EXPAND_CLOSE_FALLBACK: 'expand-modal-close-bar-fallback';
     font-family: var(--font-mono);
     font-size: to-rem($space-lg);
     line-height: 1;
-    // The carousel-control look — obsidian-glass disc + accent ring +
-    // light glyph; same chrome as the prev/next canvas buttons, only
-    // the icon differs.
+    // The carousel-control look — obsidian-glass disc + white glyph —
+    // and its signature animated ring: a faint accent track plus the
+    // glowing comet arc that perpetually sweeps the perimeter (the
+    // prev/next buttons' progress-ring motion — same animation,
+    // different icon).
     color: var(--color-white-raw);
     background: color-mix(in srgb, var(--bg-darkest) 88%, transparent);
-    box-shadow:
-      inset 0 0 0 to-rem($space-3xs) color-mix(in srgb, var(--color-accent) 28%, transparent),
-      0 0 to-rem($space-xs) color-mix(in srgb, var(--color-accent) 16%, transparent);
     border-radius: var(--radius-round);
     cursor: pointer;
+    position: relative;
     transition:
       background 0.2s ease,
-      box-shadow 0.25s ease;
+      transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+
+    // Faint full-circle track the comet travels on.
+    &::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: var(--radius-round);
+      box-shadow: inset 0 0 0 to-rem($space-3xs)
+        color-mix(in srgb, var(--color-accent) 18%, transparent);
+      pointer-events: none;
+    }
+
+    // Comet arc — a ~90° accent wedge rotating once around the ring;
+    // masked to a hairline annulus so only the rim shows, like the
+    // canvas controls' stroke arc + leading bead.
+    &::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: var(--radius-round);
+      padding: to-rem($space-3xs);
+      background: conic-gradient(
+        from 0deg,
+        transparent 0deg,
+        var(--color-accent) 70deg,
+        var(--color-accent) 90deg,
+        transparent 90deg
+      );
+      mask:
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+      mask-composite: exclude;
+      pointer-events: none;
+      animation: #{$_B_DOCS}-map-zoom-ring 3.2s linear infinite;
+      filter: drop-shadow(
+        0 0 to-rem($space-2xs) color-mix(in srgb, var(--color-accent) 60%, transparent)
+      );
+    }
+
+    @keyframes #{$_B_DOCS}-map-zoom-ring {
+      to {
+        transform: rotate(360deg);
+      }
+    }
 
     &:hover,
     &:focus-visible {
       background: color-mix(in srgb, var(--bg-darkest) 82%, var(--color-white-raw) 8%);
-      box-shadow:
-        inset 0 0 0 to-rem($space-3xs) color-mix(in srgb, var(--color-accent) 60%, transparent),
-        0 0 to-rem($space-sm) color-mix(in srgb, var(--color-accent) 35%, transparent);
       outline: to-rem($space-3xs) solid var(--focus-ring);
       outline-offset: to-rem($space-3xs);
     }
@@ -114,9 +155,11 @@ $_B_EXPAND_CLOSE_FALLBACK: 'expand-modal-close-bar-fallback';
   }
 
   // The ⤢ glyph — a real node so hover can transform it (text nodes
-  // take no transform); inline-block is the transform box.
+  // take no transform); inline-block is the transform box. Pinned to
+  // the light control ink — the ↗ reads on the dark glass disc.
   &-map-zoom-icon {
     display: inline-block;
+    color: var(--color-white-raw);
     transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
   }
 
@@ -135,7 +178,7 @@ $_B_EXPAND_CLOSE_FALLBACK: 'expand-modal-close-bar-fallback';
     width: to-rem($space-2xl);
     height: to-rem($space-2xl);
     border-radius: var(--radius-round);
-    // Project default recipe verbatim — _expand-modal's pref-close:
+    // _expand-modal's pref-close recipe verbatim — the modal default:
     // --border-color glass, white X fallback, --border-item-hover hover.
     // The liquid CloseButtonWebGL canvas paints over it when mounted.
     color: var(--color-white-raw);
