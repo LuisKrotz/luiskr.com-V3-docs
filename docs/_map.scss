@@ -123,8 +123,8 @@ $_B_EXPAND_CLOSE_FALLBACK: 'expand-modal-close-bar-fallback';
         transparent 90deg
       );
       mask:
-        linear-gradient(#fff 0 0) content-box,
-        linear-gradient(#fff 0 0);
+        linear-gradient(var(--color-white-raw) 0 0) content-box,
+        linear-gradient(var(--color-white-raw) 0 0);
       mask-composite: exclude;
       pointer-events: none;
       animation: #{$_B_DOCS}-map-zoom-ring 3.2s linear infinite;
