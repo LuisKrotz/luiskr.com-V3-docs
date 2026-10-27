@@ -1190,13 +1190,16 @@ export const graphFit = (placed: readonly PlacedNode[]): GraphFit => {
  * @param roots    Manifest root buckets.
  * @param onPick   Called with the manifest path on a node pick.
  * @param onLost   Called when the WebGL context is lost mid-flight.
+ * @param onReady  Called once the async graph build lands — the host
+ *                 drops the stage's loading veil on this signal.
  * @returns The scene handle, or null when no GL context exists.
  */
 export const mountArchSceneThree = (
   canvas: HTMLCanvasElement,
   roots: Array<{ root: string; label: string; children: DocsNode[] }>,
   onPick: (_path: string) => void,
-  onLost?: () => void
+  onLost?: () => void,
+  onReady?: () => void
 ): ArchSceneHandle | null => {
   // three's WebGLRenderer requires WebGL2 (r163+ dropped WebGL1) — probe
   // webgl2 first, then the plain webgl alias; a null either way means the
@@ -1788,6 +1791,9 @@ export const mountArchSceneThree = (
     applyActive()
 
     startFocus(activePath)
+
+    // Graph populated — the host's stage veil drops on this signal.
+    onReady?.()
   }
 
   void computePositions(placed).then(buildGraph)
@@ -2143,6 +2149,8 @@ export const mountArchSceneThree = (
  * @param onLost   Called once when no GPU path can mount — the host
  *                 hides the section (the three arm's own null return
  *                 already covered the no-WebGPU case).
+ * @param onReady  Called once when the winning arm's graph build lands
+ *                 — the host drops the stage's loading veil on it.
  * @returns Scene handle, or null only when the synchronous three
  *          probe fails outright.
  */
@@ -2150,14 +2158,15 @@ export const mountArchScene = (
   canvas: HTMLCanvasElement,
   roots: Array<{ root: string; label: string; children: DocsNode[] }>,
   onPick: (_path: string) => void,
-  onLost?: () => void
+  onLost?: () => void,
+  onReady?: () => void
 ): ArchSceneHandle | null => {
   // The WebGPU arm honours the layer kill-switch — the unverified scene3d
   // path only mounts under `?debug=webgpuWidgets:active`; everywhere else
   // the proven three.js renderer stays authoritative (same rule the
   // widget layer enforces through mountWebGpuWidget).
   if (!webglAllowed() || !hasWebGpu() || !webgpuWidgetsEnabled()) {
-    return mountArchSceneThree(canvas, roots, onPick, onLost)
+    return mountArchSceneThree(canvas, roots, onPick, onLost, onReady)
   }
 
   /** Whichever arm is live — filled when the wasm mount resolves. */
@@ -2187,7 +2196,7 @@ export const mountArchScene = (
    */
   const mountTimer = setTimeout(() => {
     threeMounted = true
-    inner = mountArchSceneThree(canvas, roots, onPick, onLost)
+    inner = mountArchSceneThree(canvas, roots, onPick, onLost, onReady)
 
     if (!inner) {
       onLost?.()
@@ -2199,7 +2208,7 @@ export const mountArchScene = (
     inner.setPaused(pendingPaused)
   }, DOCS_UNITS.SCENE3D_MOUNT_TIMEOUT)
 
-  void mountArchScene3d(canvas, roots, onPick).then((h) => {
+  void mountArchScene3d(canvas, roots, onPick, onReady).then((h) => {
     clearTimeout(mountTimer)
 
     if (disposed || threeMounted) {
@@ -2208,7 +2217,7 @@ export const mountArchScene = (
       return
     }
 
-    inner = h ?? mountArchSceneThree(canvas, roots, onPick, onLost)
+    inner = h ?? mountArchSceneThree(canvas, roots, onPick, onLost, onReady)
 
     if (!inner) {
       // No WebGPU artifact AND no WebGL — the host hides the section.

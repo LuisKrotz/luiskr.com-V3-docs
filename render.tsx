@@ -42,6 +42,21 @@ const docsHref = (subPath: string): string =>
   subPath ? `${ROUTE_PATHS.DOCS}${CHAR_STRINGS.SLASH}${subPath}` : ROUTE_PATHS.DOCS
 
 /**
+ * Map-stage loading veil — status-labelled spinner + caption covering the
+ * canvas seat while the scene's async graph build (worker layout →
+ * geometry/label upload) runs. Both stage hosts (the column and the zoom
+ * dialog) emit the identical subtree so the veil follows the persistent
+ * canvas on a mid-build re-seat.
+ */
+const mapLoadingVeil = (): HTMLElement =>
+  (
+    <div className={DOCS_CLASSES.DOCS_MAP_LOADING} role={ARIA_ATTRS.ROLE_STATUS}>
+      <span className={DOCS_CLASSES.DOCS_MAP_LOADING_SPIN} aria-hidden={ATTR_VALUES.TRUE} />
+      <span className={DOCS_CLASSES.DOCS_MAP_LOADING_LABEL}>{DOCS_STRINGS.MAP_LOADING}</span>
+    </div>
+  ) as unknown as HTMLElement
+
+/**
  * The URL a tree-row click actually lands on: an expanded dir the viewer
  * sits inside collapses UP one level, so its href mirrors the parent —
  * every other row maps to its own canonical /docs/<path>.
@@ -665,7 +680,11 @@ export const renderDocs = (view: ViewDocs) => {
               </span>
             </button>
           </div>
-          {!view._mapZoomed && <div className={DOCS_CLASSES.DOCS_MAP_STAGE} />}
+          {!view._mapZoomed && (
+            <div className={DOCS_CLASSES.DOCS_MAP_STAGE}>
+              {view._sceneLoading ? mapLoadingVeil() : null}
+            </div>
+          )}
         </aside>
 
         {/* Map zoom dialog — glass overlay centering the enlarged scene;
@@ -703,7 +722,9 @@ export const renderDocs = (view: ViewDocs) => {
                   />
                 </button>
               </div>
-              <div className={DOCS_CLASSES.DOCS_MAP_STAGE} />
+              <div className={DOCS_CLASSES.DOCS_MAP_STAGE}>
+                {view._sceneLoading ? mapLoadingVeil() : null}
+              </div>
               <button
                 type={FORM_ATTRS.TYPE_BUTTON}
                 className={DOCS_CLASSES.DOCS_MAP_CLOSE_BOTTOM}

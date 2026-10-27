@@ -55,11 +55,58 @@ $_B_EXPAND_CLOSE_FALLBACK: 'expand-modal-close-bar-fallback';
 
   // Canvas seat — the persistent scene node re-parents here every
   // render; when the zoom dialog owns the canvas this frame stays empty.
+  // Positioned so the loading veil seats over the canvas box.
   &-map-stage {
+    position: relative;
     flex: 1;
     min-height: 0;
     border-radius: var(--radius-sm);
     overflow: hidden;
+  }
+
+  // Stage loading veil — covers the canvas seat while the scene's async
+  // graph build runs (worker layout → mesh/label upload), so a slow
+  // build never reads as a blank black box. role=status carries the
+  // caption to AT; the veil dismisses imperatively on the scene's
+  // ready/lost signal (opacity → remove, boot-loader contract).
+  &-map-loading {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: to-rem($space-sm);
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--bg-primary) 72%, transparent);
+    border-radius: var(--radius-sm);
+    pointer-events: none;
+    transition: opacity 0.8s ease-in-out;
+
+    // Comet ring — the boot loader's spinner idiom scaled down to the
+    // stage: accent arc sweeping a faint track once per second.
+    &-spin {
+      width: to-rem($space-3xl);
+      height: to-rem($space-3xl);
+      border-radius: var(--radius-round);
+      border: to-rem($space-3xs) solid color-mix(in srgb, var(--color-accent) 18%, transparent);
+      border-top-color: var(--color-accent);
+      animation: #{$_B_DOCS}-map-loading-spin 1s linear infinite;
+      will-change: transform;
+    }
+
+    &-label {
+      font-family: var(--font-mono);
+      font-size: to-rem($space-xs);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    @keyframes #{$_B_DOCS}-map-loading-spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
   }
 
   // Zoom trigger — circular icon button matching the dialog's round

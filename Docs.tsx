@@ -32,6 +32,7 @@ import store from '@core/store.js'
 import { componentText } from '@core/locale/ui-text.js'
 import { devWarn } from '@core/devlog.js'
 import { applyAnimationDesc } from '@core/utils/a11y/animation-desc.js'
+import { ANIMATION_DURATIONS } from '@core/tokens/motion/animation.js'
 import { ANIMATION_IDS } from '@core/tokens/data/animation-ids.js'
 import { CloseButtonWebGL } from '@core/utils/canvas/widgets/close-button.js'
 import { generateDocsSchema, updateJsonLd } from '@core/utils/schema.js'
@@ -153,6 +154,15 @@ export class ViewDocs extends BaseComponent {
   /** Current boot stage copy + percent rendered inside the loader. */
   _loaderMsg: string = DOCS_STRINGS.LOADER_MSG_INIT
   _loaderPct = 0
+
+  /**
+   * Scene-graph build state — true while the worker-computed layout →
+   * mesh/label upload is in flight (initial mount AND context-restore
+   * remounts). The map stage's loading veil renders on this flag and is
+   * dismissed imperatively on the scene's ready/lost signal so a slow
+   * build never reads as a blank black box.
+   */
+  _sceneLoading = true
 
   constructor() {
     super(docsStyles)
@@ -794,10 +804,35 @@ export class ViewDocs extends BaseComponent {
    * `webglcontextrestored` can rebuild it — the portal stays usable the
    * whole time.
    */
+  /**
+   * Scene ready/lost teardown for the map-stage veil — flag off so
+   * subsequent renders skip it, then the live node fades + removes
+   * (same opacity→remove contract as the boot loader's dismissal).
+   */
+  private _dismissSceneLoading(): void {
+    this._sceneLoading = false
+
+    const veil = this.$<HTMLElement>(DOCS_SELECTORS.MAP_LOADING)
+
+    if (!veil) return
+
+    veil.style.opacity = CHAR_STRINGS.ZERO
+
+    setTimeout(() => veil.remove(), ANIMATION_DURATIONS.LOADER_FADE_MS)
+  }
+
   private _mountScene(canvas: HTMLCanvasElement): void {
     this._sceneHandle?.destroy()
 
     this._sceneCanvas = canvas
+
+    // A mid-life remount (context restore) lands between renders —
+    // re-arm the flag and re-render so the stage reproduces the veil.
+    if (!this._sceneLoading) {
+      this._sceneLoading = true
+
+      this._updateDom()
+    }
 
     this._sceneHandle = mountArchScene(
       canvas,
@@ -816,12 +851,18 @@ export class ViewDocs extends BaseComponent {
         canvas.classList.add(DOCS_CLASSES.DOCS_SCENE_OFF)
 
         this._sceneHandle = null
-      }
+
+        this._dismissSceneLoading()
+      },
+      () => this._dismissSceneLoading()
     )
 
     // No WebGL2 (or a dead context) → hide the canvas rather than a
     // blank box; the grid/tree/crumb navigation carries the portal.
     canvas.classList.toggle(DOCS_CLASSES.DOCS_SCENE_OFF, !this._sceneHandle)
+
+    // Synchronous mount failure never reaches onLost — drop the veil.
+    if (!this._sceneHandle) this._dismissSceneLoading()
 
     // Start watching the map-column breakpoint on the first mount —
     // one listener for the element's lifetime.

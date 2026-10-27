@@ -374,6 +374,21 @@ describe('arch-scene-3d mount', () => {
     expect(mockCtl.disposed).toBe(true)
   })
 
+  test('onReady fires once the 3d graph build lands', async () => {
+    const onReady = jest.fn()
+
+    const handle = await mountArchScene3d(canvas, ROOTS, jest.fn(), onReady)
+
+    expect(handle).not.toBeNull()
+
+    await flush()
+    await flush()
+
+    expect(onReady).toHaveBeenCalledTimes(1)
+
+    handle.destroy()
+  })
+
   test('setActive with an unresolvable path takes the activeIdx -1 climb guard', async () => {
     const handle = await mountArchScene3d(canvas, ROOTS, jest.fn())
 

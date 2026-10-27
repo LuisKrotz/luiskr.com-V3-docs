@@ -416,6 +416,26 @@ describe('docs architecture scene', () => {
     canvas.remove()
   })
 
+  test('onReady fires once the async graph build lands', async () => {
+    const canvas = document.createElement(HTML_TAGS.CANVAS)
+
+    document.body.appendChild(canvas)
+
+    const onReady = jest.fn()
+
+    const handle = mountArchScene(canvas, ROOTS, jest.fn(), jest.fn(), onReady)
+
+    expect(handle).not.toBe(null)
+
+    await flush()
+
+    expect(onReady).toHaveBeenCalledTimes(1)
+
+    handle.destroy()
+
+    canvas.remove()
+  })
+
   test('setActive with an unresolvable path takes the activeIdx -1 climb guard', async () => {
     const canvas = document.createElement(HTML_TAGS.CANVAS)
 

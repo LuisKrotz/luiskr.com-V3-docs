@@ -345,12 +345,15 @@ export const buildEdges = (
  * @param canvas   Target canvas (same element the three path uses).
  * @param roots    Manifest root buckets.
  * @param onPick   Called with the manifest path on a node pick.
+ * @param onReady  Called once the async graph build lands — the host
+ *                 drops the stage's loading veil on this signal.
  * @returns The scene handle, or null when the engine can't mount.
  */
 export const mountArchScene3d = async (
   canvas: HTMLCanvasElement,
   roots: Array<{ root: string; label: string; children: DocsNode[] }>,
-  onPick: (_path: string) => void
+  onPick: (_path: string) => void,
+  onReady?: () => void
 ): Promise<ArchSceneHandle | null> => {
   const handle = await mountScene3d(canvas)
 
@@ -714,6 +717,9 @@ export const mountArchScene3d = async (
     applyActive()
 
     startFocus(activePath)
+
+    // Graph populated — the host's stage veil drops on this signal.
+    onReady?.()
   }
 
   void computePositions(placed).then(buildGraph)
