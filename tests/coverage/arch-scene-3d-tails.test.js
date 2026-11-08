@@ -21,10 +21,15 @@ import { createMockGL } from '@tests/fixtures/mock-webgl.js'
 
 /* ── Module mocks ─────────────────────────────────────────────── */
 
+/** Mock slots the module factories read per-call — tests swap these to steer branches. */
 let mockSurface = null
+/** Value mountScene3d resolves to — null exercises the WebGPU-missing path. */
 let mountResult = null
+/** Orbit-controller stub bindOrbit returns — null exercises the no-orbit path. */
 let mockCtl = null
+/** hasWebGpu() return — false routes every widget mount to the 2d fallback. */
 let mockGpu = true
+/** webgpuWidgetsEnabled() return — the kill-switch branch. */
 let mockGpuEnabled = true
 
 jest.unstable_mockModule('@core/utils/gpu/scene3d.js', () => ({
@@ -52,6 +57,7 @@ const { mountArchScene, placeRoots, computePositions, graphFit } =
 
 /* ── Fixture tree ─────────────────────────────────────────────── */
 
+/** Docs-tree fixture — one root with nested dir/file children for scene walks. */
 const ROOTS = [
   {
     root: 'docs',
@@ -75,6 +81,7 @@ const ROOTS = [
   },
 ]
 
+/** Timer flush — mounted scene queues need real timers past microtasks. */
 const flush = (ms = 60) => new Promise((r) => setTimeout(r, ms))
 
 /** Fake Surface3d — records every call; ids increment per family. */
@@ -158,6 +165,8 @@ const makeSurface = () => {
   }
 }
 
+/** Orbit-controller stub — listener registry + mutable pose/distance so
+ *  tests can trigger orbit events and verify the scene re-fits. */
 const makeCtl = () => {
   const listeners = new Map()
 

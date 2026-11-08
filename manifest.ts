@@ -135,6 +135,7 @@ const hydrateManifest = (wire: DocsWireManifest): DocsManifest => ({
   }),
 })
 
+/** Hydrated manifest singleton — decoded once at module load, shared by every lookup below. */
 const _manifest = hydrateManifest(manifest)
 
 /** The scanned manifest — the vite plugin + jest stub always emit one. */

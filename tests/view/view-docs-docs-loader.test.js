@@ -18,6 +18,7 @@ import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
 import { DOCS_LOADER_PCT, DOCS_STRINGS } from '@core/tokens/strings/docs.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 
+/** Doc-payload factory matching the docs loader's shape; per-test overrides merge in. */
 const makePayload = (over = {}) => ({
   name: 'website.md',
   path: 'docs/architecture/website.md',
@@ -28,6 +29,7 @@ const makePayload = (over = {}) => ({
   ...over,
 })
 
+/** Route-record factory for the docs portal — params.docsPath carries the sub-path. */
 const docsRoute = (docsPath = '') => ({
   name: ROUTE_NAMES.DOCS,
   view: VIEW_TAGS.VIEW_DOCS,

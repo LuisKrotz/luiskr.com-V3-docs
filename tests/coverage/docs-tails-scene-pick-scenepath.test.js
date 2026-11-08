@@ -8,7 +8,9 @@
 import { describe, test, expect, jest } from '@jest/globals'
 import { DOCS_STRINGS } from '@core/tokens/strings/docs.js'
 
+/** Callback captured from mountArchScene — tests fire onPick manually. */
 let pickCb = () => {}
+/** Recorded mountArchScene invocations — tests assert canvas/groups args. */
 let mountCalls = []
 
 jest.unstable_mockModule('@docs/arch-scene.js', () => ({
@@ -20,6 +22,7 @@ jest.unstable_mockModule('@docs/arch-scene.js', () => ({
   },
 }))
 
+/** Timer flush — drains queued mount/pick microtasks between actions. */
 const flush = () => new Promise((r) => setTimeout(r, 0))
 
 describe('Docs scene pick + _scenePath arms', () => {

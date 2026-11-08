@@ -10,6 +10,7 @@ import { ViewDocs } from '@docs/Docs.js'
 import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
 import { MOUSE_EVENTS } from '@core/tokens/events/dom.js'
 
+/** Timer flush — drains queued render microtasks between actions. */
 const flush = () => new Promise((r) => setTimeout(r, 0))
 
 describe('Docs coverage tails — dir state + lifecycle arms', () => {

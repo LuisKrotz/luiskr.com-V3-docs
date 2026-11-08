@@ -9,6 +9,7 @@ import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
 import { GL_EVENTS } from '@core/tokens/events/dom.js'
 import { HTML_TAGS } from '@core/tokens/elements/html.js'
 
+/** Timer flush — mounted render queues need real timers past microtasks. */
 const flush = (ms = 40) => new Promise((r) => setTimeout(r, ms))
 
 // ─── gl-strip.ts ──────────────────────────────────────────────────────────────

@@ -17,6 +17,7 @@ import { DOCS_STRINGS, DOCS_LOADER_PCT } from '@core/tokens/strings/docs.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 import { ANIMATION_DURATIONS } from '@core/tokens/motion/animation.js'
 
+/** Route-record factory for the docs portal — params.docsPath carries the sub-path. */
 const docsRoute = (docsPath = '') => ({
   name: ROUTE_NAMES.DOCS,
   view: VIEW_TAGS.VIEW_DOCS,

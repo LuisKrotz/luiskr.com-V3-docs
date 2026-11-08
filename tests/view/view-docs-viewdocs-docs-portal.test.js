@@ -21,6 +21,7 @@ import { CLIPBOARD_EVENTS, KEYBOARD_EVENTS, MOUSE_EVENTS } from '@core/tokens/ev
 import { KEYS } from '@core/tokens/primitives.js'
 import { SOCIAL_URLS } from '@core/tokens/media/urls.js'
 
+/** Doc-payload factory matching the docs loader's shape; per-test overrides merge in. */
 const makePayload = (over = {}) => ({
   name: 'website.md',
   path: 'docs/architecture/website.md',
@@ -31,6 +32,7 @@ const makePayload = (over = {}) => ({
   ...over,
 })
 
+/** Route-record factory for the docs portal — params.docsPath carries the sub-path. */
 const docsRoute = (docsPath = '') => ({
   name: ROUTE_NAMES.DOCS,
   view: VIEW_TAGS.VIEW_DOCS,

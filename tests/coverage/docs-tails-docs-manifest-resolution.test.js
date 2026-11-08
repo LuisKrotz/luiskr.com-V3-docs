@@ -12,6 +12,7 @@ import {
 } from '@docs/manifest.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 
+/** Timer flush — mounted render queues need real timers past microtasks. */
 const _flush = (ms = 40) => new Promise((r) => setTimeout(r, ms))
 
 // ─── manifest.ts ─────────────────────────────────────────────────────────────

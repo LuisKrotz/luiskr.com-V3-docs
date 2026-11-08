@@ -9,6 +9,7 @@
 import { describe, test, expect } from '@jest/globals'
 import { MOUSE_EVENTS } from '@core/tokens/events/dom.js'
 
+/** Timer flush — mounted render queues need real timers past microtasks. */
 const flush = (ms = 40) => new Promise((r) => setTimeout(r, ms))
 
 describe('docs tails — scene path + handler arms', () => {

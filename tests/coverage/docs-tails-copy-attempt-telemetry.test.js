@@ -7,6 +7,7 @@ import { trackCopyAttempt } from '@docs/telemetry.js'
 import { DOCS_STRINGS } from '@core/tokens/strings/docs.js'
 import { CDN_URLS } from '@core/tokens/media/urls.js'
 
+/** Timer flush — mounted render queues need real timers past microtasks. */
 const flush = (ms = 40) => new Promise((r) => setTimeout(r, ms))
 
 // ─── telemetry.ts ─────────────────────────────────────────────────────────────

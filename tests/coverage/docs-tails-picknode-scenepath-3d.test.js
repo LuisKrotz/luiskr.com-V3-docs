@@ -8,6 +8,7 @@
 
 import { describe, test, expect, jest } from '@jest/globals'
 
+/** Timer flush — mounted render queues need real timers past microtasks. */
 const flush = (ms = 40) => new Promise((r) => setTimeout(r, ms))
 
 describe('docs tails — pickNode/scenePath/3d arms', () => {

@@ -11,11 +11,14 @@ import { describe, test, expect } from '@jest/globals'
 import { treeIcon } from '@docs/tree-icon.js'
 import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
 
+/** Selector constants — class fragments the tests match()/querySelector against. */
 const BODY = `.${DOCS_CLASSES.DOCS_TREE_ICON}-body`
 const FLAP = `.${DOCS_CLASSES.DOCS_TREE_ICON}-flap`
 const PAPER = `.${DOCS_CLASSES.DOCS_TREE_PAPER}`
+/** Icon-kind modifier list from tokens — iterated to cover every variant class. */
 const KINDS = DOCS_CLASSES.DOCS_ICON_KINDS
 
+/** BEM modifier selector for a given icon kind (e.g. `.icon--folder`). */
 const kindSel = (kind) => `.${DOCS_CLASSES.DOCS_TREE_ICON}--${kind}`
 
 describe('treeIcon — node-shape arms', () => {

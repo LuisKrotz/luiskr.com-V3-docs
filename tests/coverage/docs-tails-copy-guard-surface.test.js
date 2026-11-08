@@ -9,6 +9,7 @@ import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 import { CLIPBOARD_EVENTS, KEYBOARD_EVENTS } from '@core/tokens/events/dom.js'
 import { SOCIAL_URLS } from '@core/tokens/media/urls.js'
 
+/** Timer flush — mounted render queues need real timers past microtasks. */
 const _flush = (ms = 40) => new Promise((r) => setTimeout(r, ms))
 
 // ─── copy-guard.ts ────────────────────────────────────────────────────────────

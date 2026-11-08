@@ -10,6 +10,7 @@ import { attachCoverageNav } from '@docs/coverage-nav.js'
 import { KEYBOARD_EVENTS } from '@core/tokens/events/dom.js'
 import { DOCS_SELECTORS } from '@core/tokens/selectors/docs.js'
 
+/** Mounts an HTML fragment in a fresh <div> — assertions query the box's content. */
 const makeBox = (inner) => {
   const box = document.createElement('div')
 
@@ -20,6 +21,8 @@ const makeBox = (inner) => {
   return box
 }
 
+/** Synthetic keydown factory — modifiers are patched onto the instance
+ *  since happy-dom's KeyboardEvent ignores them in the init dict. */
 const key = (k, mods = {}) => {
   const e = new KeyboardEvent(KEYBOARD_EVENTS.KEYDOWN, { key: k })
 

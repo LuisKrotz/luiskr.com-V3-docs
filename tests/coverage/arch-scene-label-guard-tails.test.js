@@ -13,6 +13,7 @@ import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globa
 import { createMockGL } from '@tests/fixtures/mock-webgl.js'
 import { HTML_TAGS } from '@core/tokens/elements/html.js'
 
+/** Mutable flags the three.js mock reads per-call — tests flip rendererThrow to hit the constructor-failure branch. */
 const mockThreeState = {
   rendererThrow: false,
 }
@@ -252,6 +253,7 @@ jest.unstable_mockModule('three', () => {
 const { mountArchScene } = await import('@docs/arch-scene.js')
 const { wasmPool } = await import('@core/utils/wasm/wasm-pool.js')
 
+/** Docs-tree fixture the scene walks — two roots with nested dir/file children to exercise label-resolution branches. */
 const ROOTS = [
   {
     root: 'docs',
@@ -280,6 +282,7 @@ const ROOTS = [
   },
 ]
 
+/** Timer flush — mounted render/label queues need real timers past microtasks. */
 const flush = (ms = 40) => new Promise((r) => setTimeout(r, ms))
 
 describe('arch-scene label guard — missing texture surface', () => {

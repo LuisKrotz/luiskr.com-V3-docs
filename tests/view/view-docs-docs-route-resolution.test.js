@@ -8,6 +8,7 @@ import { VIEW_TAGS } from '@core/tokens/elements/views.js'
 import { ROUTE_PATHS } from '@core/tokens/routes/paths.js'
 import { ROUTE_NAMES } from '@core/tokens/routes/names.js'
 
+/** Doc-payload factory matching the docs loader's shape; per-test overrides merge in. */
 const _makePayload = (over = {}) => ({
   name: 'website.md',
   path: 'docs/architecture/website.md',
@@ -18,6 +19,7 @@ const _makePayload = (over = {}) => ({
   ...over,
 })
 
+/** Route-record factory for the docs portal — params.docsPath carries the sub-path. */
 const _docsRoute = (docsPath = '') => ({
   name: ROUTE_NAMES.DOCS,
   view: VIEW_TAGS.VIEW_DOCS,

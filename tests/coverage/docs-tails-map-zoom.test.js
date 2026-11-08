@@ -20,6 +20,7 @@ import { ARIA_ATTRS } from '@core/tokens/attrs/aria.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 import { KEYS } from '@core/tokens/primitives.js'
 
+/** Route-record factory for the docs portal — params.docsPath carries the sub-path. */
 const docsRoute = (docsPath = CHAR_STRINGS.EMPTY) => ({
   name: ROUTE_NAMES.DOCS,
   view: VIEW_TAGS.VIEW_DOCS,
@@ -29,6 +30,7 @@ const docsRoute = (docsPath = CHAR_STRINGS.EMPTY) => ({
   params: { docsPath },
 })
 
+/** Timer flush — drains queued map-mount microtasks between actions. */
 const flush = () => new Promise((r) => setTimeout(r, 0))
 
 describe('ViewDocs — file cloud zoom + pause wiring', () => {

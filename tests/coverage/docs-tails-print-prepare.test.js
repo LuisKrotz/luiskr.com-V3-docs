@@ -20,6 +20,7 @@ import { READER_CLASSES } from '@core/tokens/classes/reader.js'
 import { PRINT_EVENTS } from '@core/tokens/events/dom.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 
+/** Route-record factory for the docs portal — params.docsPath carries the sub-path. */
 const docsRoute = (docsPath = '') => ({
   name: ROUTE_NAMES.DOCS,
   view: VIEW_TAGS.VIEW_DOCS,
@@ -29,6 +30,7 @@ const docsRoute = (docsPath = '') => ({
   params: { docsPath },
 })
 
+/** Dispatches the print-prepare event the view listens for — exercises the pre-print mirror build. */
 const firePrepare = () => window.dispatchEvent(new window.Event(PRINT_EVENTS.PREPARE))
 
 /** Builds a reader mirror with a sentinel child the assertions diff on. */

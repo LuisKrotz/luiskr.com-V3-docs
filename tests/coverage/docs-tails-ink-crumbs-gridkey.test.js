@@ -15,6 +15,7 @@ import { ROUTE_PATHS } from '@core/tokens/routes/paths.js'
 import { QUERY_STRINGS } from '@core/tokens/strings/queries.js'
 import { SCHEMA_STRINGS } from '@core/tokens/strings/schema.js'
 
+/** Timer flush — mounted render queues need real timers past microtasks. */
 const flush = (ms = 40) => new Promise((r) => setTimeout(r, ms))
 
 describe('docs tails — ink, crumbs, grid keys, tree focus', () => {

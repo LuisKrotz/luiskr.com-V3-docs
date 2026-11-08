@@ -302,8 +302,10 @@ const { CACHE_STORAGE_KEYS } = await import('@core/tokens/data/storage.js')
 const { GL_EVENTS } = await import('@core/tokens/events/dom.js')
 const { OrbitControls } = await import('three/examples/jsm/controls/OrbitControls.js')
 const { wasmPool } = await import('@core/utils/wasm/wasm-pool.js')
+/** Shared router singleton — scene navigation calls push() on it. */
 const router = (await import('@core/router/router.js')).default
 
+/** Docs-tree fixture — two roots with nested dir/file children for scene walks. */
 const ROOTS = [
   {
     root: 'docs',
@@ -332,6 +334,7 @@ const ROOTS = [
   },
 ]
 
+/** Timer flush — mounted scene queues need real timers past microtasks. */
 const flush = (ms = 40) => new Promise((r) => setTimeout(r, ms))
 
 /**

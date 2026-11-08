@@ -19,6 +19,7 @@ import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 import { KEYBOARD_EVENTS, MOUSE_EVENTS } from '@core/tokens/events/dom.js'
 import { KEYS } from '@core/tokens/primitives.js'
 
+/** Route-record factory for the docs portal — params.docsPath carries the sub-path. */
 const docsRoute = (docsPath = '') => ({
   name: ROUTE_NAMES.DOCS,
   view: VIEW_TAGS.VIEW_DOCS,
@@ -28,6 +29,7 @@ const docsRoute = (docsPath = '') => ({
   params: { docsPath },
 })
 
+/** Ctrl+click MouseEvent — exercises the "modifier keeps native semantics" guard arm. */
 const ctrlClick = () =>
   new MouseEvent(MOUSE_EVENTS.CLICK, { bubbles: true, cancelable: true, ctrlKey: true })
 

@@ -34,8 +34,11 @@ const FONT_SIZE_FALLBACK = 14
  * structural feature, not a parse (the wasm engine still does that).
  */
 const EDGE_RE = /-->>|->>|-->|-.->|--x/g
+/** Node-shape opener — any `[`, `(`, or `{` begins a node declaration. */
 const NODE_RE = /[[({]/g
+/** Nested subgraph keyword — bumps the bracket-depth heuristic. */
 const NEST_RE = /\bsubgraph\b/g
+/** Self-edge — `A -> A` adds visual noise the layout already implies. */
 const SELF_RE = /(\b\w+)\s*[-.]+>{1,2}\s*\1\b/g
 
 /** Counts regex matches without allocating a match array. */

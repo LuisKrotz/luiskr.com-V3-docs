@@ -157,6 +157,9 @@ const glyphVertexPreamble =
   `attribute float ${ATTR_A_SCALE};\n` +
   `varying vec3 vColor;\nvarying float vAlpha;\n`
 
+/** Vertex-stage patch: billboards each glyph to the camera basis, applies
+ *  the shared pulse/active scale and the per-phase bob, then forwards
+ *  per-instance color/alpha to the fragment varyings. */
 const glyphVertexTransform =
   `${GLSL_BEGIN_VERTEX}\n` +
   // The tier meshes sit unrotated at the scene root, so local space IS
@@ -173,8 +176,11 @@ const glyphVertexTransform =
   `vColor = ${ATTR_A_COLOR};\n` +
   `vAlpha = ${ATTR_A_ALPHA};\n`
 
+/** Fragment preamble — declares the varyings the vertex stage feeds. */
 const glyphFragmentPreamble = 'varying vec3 vColor;\nvarying float vAlpha;\n'
 
+/** Fragment ink patch — overwrites three's diffuse with the per-instance
+ *  color and folds the per-instance alpha into the blended output. */
 const glyphFragmentInk = `${GLSL_COLOR_FRAGMENT}\ndiffuseColor.rgb = vColor;\ndiffuseColor.a *= vAlpha;\n`
 
 /**
@@ -185,6 +191,8 @@ const glyphFragmentInk = `${GLSL_COLOR_FRAGMENT}\ndiffuseColor.rgb = vColor;\ndi
  */
 const edgeVertexPreamble = `uniform float uTime;\nattribute float ${ATTR_A_PHASE};\n`
 
+/** Edge vertex patch — offsets Y by the same phase-locked sine the glyph
+ *  centers ride, keeping link endpoints glued to their floating nodes. */
 const edgeVertexBob =
   `${GLSL_BEGIN_VERTEX}\n` +
   `transformed = vec3(transformed.x, transformed.y + sin(uTime * ${DOCS_UNITS.SCENE_BOB_SPEED} + ${ATTR_A_PHASE}) * ${DOCS_UNITS.SCENE_BOB_AMP}, transformed.z);\n`
@@ -933,6 +941,14 @@ export const makeLabelCanvas = (name: string, ink: string): HTMLCanvasElement | 
   return cnv
 }
 
+/**
+ * Wraps a rendered label canvas into a THREE.Sprite + material pair —
+ * returns null when the sprite/texture classes (or a 2d context) are
+ * unavailable so the scene skips labels rather than crashing.
+ * @param name Label text (drawn centered in the sprite).
+ * @param ink Fill color for the label glyphs.
+ * @returns The sprite/material pair, or null when unsupported.
+ */
 const makeLabel = (
   name: string,
   ink: string
@@ -1020,6 +1036,14 @@ export const readCamState = (): SceneCamState | null => {
 const countSceneSubtree = (node: DocsNode): number =>
   (node.children ?? []).reduce((n, c) => n + 1 + countSceneSubtree(c), 0)
 
+/**
+ * Depth-caps a docs tree for the scene: beyond the cap, children collapse
+ * into a single "+N" aggregate leaf so the 3d map stays legible at
+ * ~7k nodes instead of degenerating into a wall of sprites.
+ * @param node Tree node to prune.
+ * @param depth Current depth (1-based; deeper levels aggregate).
+ * @returns The pruned node (children replaced by an aggregate leaf).
+ */
 const capSceneLeaves = (node: DocsNode, depth = 1): DocsNode => {
   const kids = node.children
 

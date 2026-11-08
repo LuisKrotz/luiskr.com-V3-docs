@@ -47,6 +47,7 @@ jest.unstable_mockModule('virtual:docs-manifest', () => ({
   default: encodeManifest(FIXTURE),
 }))
 
+/** Timer flush — mounted render queues need real timers past microtasks. */
 const flush = (ms = 30) => new Promise((r) => setTimeout(r, ms))
 
 describe('docs index — streaming tails', () => {

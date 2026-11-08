@@ -18,8 +18,11 @@ import { GL_EVENTS } from '@core/tokens/events/dom.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 import { ANIMATION_DURATIONS } from '@core/tokens/motion/animation.js'
 
+/** Callback captured from mountArchScene — tests fire onReady manually. */
 let readyCb = null
+/** Callback captured from mountArchScene — tests fire onLost (context loss). */
 let lostCb = null
+/** Handle mountArchScene returns — tests swap to control the live/null path. */
 let mountReturn = null
 
 jest.unstable_mockModule('@docs/arch-scene.js', () => ({
@@ -31,8 +34,10 @@ jest.unstable_mockModule('@docs/arch-scene.js', () => ({
   },
 }))
 
+/** Timer flush — mounted scene queues need real timers past microtasks. */
 const flush = (ms = 0) => new Promise((r) => setTimeout(r, ms))
 
+/** Minimal arch-scene handle — every method a jest.fn so tests assert calls. */
 const liveHandle = () => ({
   destroy: jest.fn(),
   setActive: jest.fn(),
@@ -40,6 +45,7 @@ const liveHandle = () => ({
   resize: jest.fn(),
 })
 
+/** Shadow-DOM lookup for the map-stage loading veil element. */
 const veilOf = (view) => view.shadowRoot.querySelector(DOCS_SELECTORS.MAP_LOADING)
 
 describe('ViewDocs — map-stage loading veil', () => {

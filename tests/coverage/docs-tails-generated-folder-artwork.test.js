@@ -9,12 +9,14 @@ import { describe, test, expect } from '@jest/globals'
 import { treeIcon } from '@docs/tree-icon.js'
 import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
 
+/** Selector constants — class fragments the tests match() against the SVG root. */
 const ICON = `.${DOCS_CLASSES.DOCS_TREE_ICON}`
 const PAPER = `.${DOCS_CLASSES.DOCS_TREE_PAPER}`
 const BODY = `.${DOCS_CLASSES.DOCS_TREE_ICON}-body`
 const FLAP = `.${DOCS_CLASSES.DOCS_TREE_ICON}-flap`
 const FACE = `.${DOCS_CLASSES.DOCS_TREE_ICON}-face`
 
+/** dir-node factory — the minimal DocsNode shape treeIcon() consumes. */
 const dir = (name, children = []) => ({ type: 'dir', name, path: `docs/${name}`, children })
 
 describe('generated folder artwork', () => {
