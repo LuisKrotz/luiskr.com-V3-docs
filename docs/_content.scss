@@ -62,6 +62,9 @@
     grid-template-columns: minmax(0, 1fr);
     gap: to-rem($space-xl);
     flex: 1;
+    // 120px floor between the portal content and the footer — vertical
+    // pad only; horizontal stays on %MAXAREA's gutter (the header note).
+    padding-bottom: to-rem(120);
 
     // 1025–1280 — the stack cell (combobox nav above content) shares the
     // row with the right-hand file cloud. The map spans one row so

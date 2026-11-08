@@ -97,6 +97,9 @@
   }
 
   &-card-label {
+    // Jost (--font-desc) — the index-caption face, same contract the
+    // sitemap locale chips carry.
+    font-family: var(--font-desc);
     font-size: to-rem($space-lg);
     word-break: break-word;
     text-align: center;

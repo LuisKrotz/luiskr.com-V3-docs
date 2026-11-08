@@ -3,17 +3,77 @@
  * @description Coverage tails — parseInk's short-hex arm, the tree
  * anchor's modified-click return, the crumb input's keydown/select
  * callbacks at a non-root docs path, treeFocusItem's matched-row flip,
- * and the scene setActive unresolvable-path guard.
+ * the docs indexation guard, and the scene setActive unresolvable-path guard.
  */
 
 import { describe, test, expect } from '@jest/globals'
 import { MOUSE_EVENTS } from '@core/tokens/events/dom.js'
 import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
 import { DATA_ATTRS } from '@core/tokens/attrs/data.js'
+import { ROUTE_NAMES } from '@core/tokens/routes/names.js'
+import { ROUTE_PATHS } from '@core/tokens/routes/paths.js'
+import { QUERY_STRINGS } from '@core/tokens/strings/queries.js'
+import { SCHEMA_STRINGS } from '@core/tokens/strings/schema.js'
 
 const flush = (ms = 40) => new Promise((r) => setTimeout(r, ms))
 
 describe('docs tails — ink, crumbs, grid keys, tree focus', () => {
+  test('resolved docs pages are indexable and unknown paths noindex', async () => {
+    const { default: router } = await import('@core/router/router.js')
+    const { ViewDocs } = await import('@docs/Docs.js')
+
+    const previousRoute = router.currentRoute
+
+    const originalMeta = document.querySelector(QUERY_STRINGS.META_ROBOTS)
+
+    const originalContent = originalMeta?.content
+
+    const pageRoute = {
+      name: ROUTE_NAMES.DOCS,
+      path: ROUTE_PATHS.DOCS,
+      params: { docsPath: 'unresolvable-seo-path' },
+    }
+
+    let missing
+    let root
+
+    try {
+      router.currentRoute = pageRoute
+
+      missing = new ViewDocs()
+
+      document.body.appendChild(missing)
+      await flush()
+
+      expect(document.querySelector(QUERY_STRINGS.META_ROBOTS)?.content).toBe(
+        SCHEMA_STRINGS.NOINDEX_NOFOLLOW
+      )
+
+      router.currentRoute = { ...pageRoute, params: { docsPath: '' } }
+
+      root = new ViewDocs()
+
+      document.body.appendChild(root)
+      await flush()
+
+      expect(document.querySelector(QUERY_STRINGS.META_ROBOTS)?.content).toBe(
+        SCHEMA_STRINGS.INDEX_RICH_DIRECTIVES
+      )
+    } finally {
+      missing?.remove()
+
+      root?.remove()
+
+      router.currentRoute = previousRoute
+
+      if (originalMeta) {
+        originalMeta.content = originalContent
+      } else {
+        document.querySelector(QUERY_STRINGS.META_ROBOTS)?.remove()
+      }
+    }
+  })
+
   test('parseInk covers rgb, short-hex, long-hex and fallback arms', async () => {
     const { parseInk } = await import('@docs/arch-scene-3d.js')
 

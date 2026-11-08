@@ -205,6 +205,9 @@
     border: 0;
     color: inherit;
     font: inherit;
+    // Jost (--font-desc) after the inherit shorthand — the nav face is
+    // the index-caption family, not the body copy stack.
+    font-family: var(--font-desc);
     text-align: left;
     // Rows are <a href> (crawlable docs routes) — read as buttons did.
     text-decoration: none;

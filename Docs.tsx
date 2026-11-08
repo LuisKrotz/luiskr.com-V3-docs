@@ -35,7 +35,7 @@ import { applyAnimationDesc } from '@core/utils/a11y/animation-desc.js'
 import { ANIMATION_DURATIONS } from '@core/tokens/motion/animation.js'
 import { ANIMATION_IDS } from '@core/tokens/data/animation-ids.js'
 import { CloseButtonWebGL } from '@core/utils/canvas/widgets/close-button.js'
-import { generateDocsSchema, updateJsonLd } from '@core/utils/schema.js'
+import { generateDocsSchema, setRobotsMeta, updateJsonLd } from '@core/utils/schema.js'
 import { isPlainClick } from '@core/utils/dom.js'
 import { BASE_TITLE } from '@core/tokens/routes.js'
 import router from '@core/router/router.js'
@@ -936,12 +936,15 @@ export class ViewDocs extends BaseComponent {
   /**
    * Applies a docsPath: resolves the manifest node, auto-expands the
    * ancestor dirs in the treeview, syncs the page title + JSON-LD graph
-   * (BreadcrumbList + TechArticle/CollectionPage) so every /docs/* route
-   * is crawlable, and kicks the lazy file fetch.
+   * (BreadcrumbList + TechArticle/CollectionPage), noindexes unresolved
+   * paths, and kicks the lazy file fetch.
+   * @param docsPath Manifest-relative docs path.
    */
   private _applyPath(docsPath: string): void {
     this.docsPath = docsPath
     this.node = resolveDocsPath(docsPath)
+
+    setRobotsMeta(Boolean(docsPath && !this.node))
 
     const pageName = this.node?.name || DOCS_STRINGS.TITLE
 

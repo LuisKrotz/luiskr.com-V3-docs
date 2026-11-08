@@ -14,6 +14,7 @@ import { DATA_ATTRS } from '@core/tokens/attrs/data.js'
 import { HTML_PHRASING_TAGS, HTML_TAGS } from '@core/tokens/elements/html.js'
 import { FORM_ATTRS } from '@core/tokens/attrs/form.js'
 import { MICRODATA_ATTRS, MICRODATA_VALUES } from '@core/tokens/attrs/microdata.js'
+import { COMPONENT_TAGS } from '@core/tokens/elements/components.js'
 import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
 import { EXPAND_MODAL_CLASSES } from '@core/tokens/classes/modal.js'
 import { PREF_CLASSES } from '@core/tokens/classes/preferences.js'
@@ -27,6 +28,7 @@ import { h } from '@core/jsx.js'
 import { isPlainClick } from '@core/utils/dom.js'
 import { ARROW_GLYPHS } from '@core/tokens/theme/arrows.js'
 import { treeIcon } from './tree-icon.js'
+import '@website/components/legal/Footer.js'
 import { crumbsForPath, docsGroups } from './manifest.js'
 import type { ViewDocs } from './Docs.js'
 import type { DocsNode } from './manifest.js'
@@ -465,6 +467,8 @@ export const renderDocs = (view: ViewDocs) => {
   // TechArticle while a file is open, CollectionPage otherwise.
   const isFilePage = view.node?.type === 'file'
 
+  const LegalFooter = COMPONENT_TAGS.LEGAL_FOOTER
+
   return (
     <div
       className={`${DOCS_CLASSES.DOCS}${view.navOpen ? ` ${DOCS_CLASSES.DOCS_NAV_OPEN}` : CHAR_STRINGS.EMPTY}`}
@@ -736,6 +740,10 @@ export const renderDocs = (view: ViewDocs) => {
           </div>
         )}
       </div>
+
+      {/* Shared legal footer — the last column child; the content
+          column's 120px bottom pad keeps it clear of the portal. */}
+      <LegalFooter />
     </div>
   ) as unknown as HTMLElement
 }

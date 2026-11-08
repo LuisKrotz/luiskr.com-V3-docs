@@ -7,6 +7,7 @@ import { ViewDocs } from '@docs/Docs.js'
 import { mount } from '@tests/fixtures/test-constants.js'
 import router from '@core/router/router.js'
 import { VIEW_TAGS } from '@core/tokens/elements/views.js'
+import { COMPONENT_TAGS } from '@core/tokens/elements/components.js'
 import { ROUTE_PATHS } from '@core/tokens/routes/paths.js'
 import { ROUTE_NAMES } from '@core/tokens/routes/names.js'
 import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
@@ -111,7 +112,8 @@ describe('ViewDocs — docs portal', () => {
     expect($(`#${DOCS_IDS.SCENE}`)).toBeTruthy()
     // The portal grid sections the flat root buckets under four groups.
     expect($(`.${DOCS_CLASSES.DOCS_GRID}`).children.length).toBe(4)
-    expect(view.shadowRoot.querySelector('legal-footer')).toBeFalsy()
+    // The shared legal footer mounts inside the portal column.
+    expect(view.shadowRoot.querySelector(COMPONENT_TAGS.LEGAL_FOOTER)).toBeTruthy()
   })
 
   test('all docs are linked: tree h2, card h3s + the streamed index nav', async () => {
