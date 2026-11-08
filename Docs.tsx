@@ -59,7 +59,7 @@ import { attachCopyGuard, type GuardDisposer } from './copy-guard.js'
 import { attachCoverageNav } from './coverage-nav.js'
 import { renderMermaidBlocks } from './mermaid.js'
 import { dismissDocsLoader, updateDocsLoader } from './loader.js'
-import docsStyles from './docs.scss?inline'
+import docsStyles from './docs.scss?tiers'
 
 /**
  * The ViewDocs — docs portal route element.
