@@ -51,13 +51,20 @@ import {
   type DocsNode,
   type DocsFilePayload,
 } from './manifest.js'
-import { FORM_EVENTS, GL_EVENTS, MOUSE_EVENTS, PRINT_EVENTS } from '@core/tokens/events/dom.js'
+import {
+  CLIPBOARD_EVENTS,
+  FORM_EVENTS,
+  GL_EVENTS,
+  MOUSE_EVENTS,
+  PRINT_EVENTS,
+} from '@core/tokens/events/dom.js'
 import { renderDocs } from './render.js'
 import { mountDocsGlStrip, type DocsGlHandle } from './gl-strip.js'
 import { mountArchScene, type ArchSceneHandle } from './arch-scene.js'
 import { attachCopyGuard, type GuardDisposer } from './copy-guard.js'
 import { attachCoverageNav } from './coverage-nav.js'
-import { renderMermaidBlocks } from './mermaid.js'
+import { renderMermaidBlocks, renderMermaidBlocksForPrint } from './mermaid.js'
+import { trackPrintJob } from '@core/utils/print/print.js'
 import { dismissDocsLoader, updateDocsLoader } from './loader.js'
 import docsStyles from './docs.scss?tiers'
 
@@ -142,6 +149,13 @@ export class ViewDocs extends BaseComponent {
 
   /** Document-level istanbul key-nav disposer while a report is open. */
   private _covNavDispose: (() => void) | null = null
+
+  /**
+   * `true` while the print mirror was created on demand (dev sessions
+   * ship no prerendered `article.reader-content`) — the afterprint pass
+   * removes it so no stray parked article outlives the print pass.
+   */
+  private _mirrorCreated = false
 
   /**
    * Boot-loader lifecycle — the overlay stays up until the portal's first
@@ -534,20 +548,67 @@ export class ViewDocs extends BaseComponent {
     )
 
     window.addEventListener(PRINT_EVENTS.PREPARE, this._onPrintPrepare)
+    window.addEventListener(CLIPBOARD_EVENTS.AFTER_PRINT, this._onAfterPrint)
+  }
+
+  /**
+   * The printable mirror — the prerendered `article.reader-content` in
+   * production, created on demand in dev. A created mirror is flagged so
+   * the unprepared pass removes the element instead of just emptying it.
+   */
+  private _printMirror(): HTMLElement {
+    let article = document.querySelector<HTMLElement>(
+      `${HTML_TAGS.ARTICLE}.${READER_CLASSES.CONTENT}`
+    )
+
+    if (!article) {
+      article = document.createElement(HTML_TAGS.ARTICLE)
+      article.className = READER_CLASSES.CONTENT
+      document.body.appendChild(article)
+
+      this._mirrorCreated = true
+    }
+
+    return article
+  }
+
+  /**
+   * Returns the mirror to its unprepared state: a created (dev) article
+   * leaves the DOM outright; a prerendered one drops the prepared marker
+   * and its cloned content so the `:empty` rule parks it again and #app
+   * prints the live view on the next pass.
+   */
+  private _unprepareMirror = (): void => {
+    const article = document.querySelector(`${HTML_TAGS.ARTICLE}.${READER_CLASSES.CONTENT}`)
+
+    if (!article) return
+
+    if (this._mirrorCreated) {
+      article.remove()
+
+      this._mirrorCreated = false
+
+      return
+    }
+
+    article.removeAttribute(DATA_ATTRS.PRINT_DOC)
+    article.replaceChildren()
   }
 
   /**
    * Print-prepare answer — the print adapter fires `printprepare` before
-   * its media walk so generated DOM reaches the readable mirror: the
-   * payload box's rendered form (mermaid SVG diagrams, istanbul tables)
-   * replaces the article's static copy. Cloned canvases are dead buffers
-   * and get stripped — the live canvases inject their own captured
-   * stills during the walk.
+   * its media walk so the selected page's rendered form (mermaid SVG
+   * diagrams, istanbul tables) lands in the reader mirror, which the
+   * print sheet then treats as the document: `data-print-doc` marks it
+   * authoritative and #app steps aside. With no page open the mirror is
+   * left unprepared — the portal's light card grid prints instead.
+   * Cloned canvases are dead buffers and get stripped — the live
+   * canvases inject their own captured stills during the walk.
    */
   private _onPrintPrepare = (): void => {
-    const article = document.querySelector(`${HTML_TAGS.ARTICLE}.${READER_CLASSES.CONTENT}`)
-
-    if (!article) return
+    // Any earlier prepared state on this view is stale for this pass —
+    // unpreparing first keeps the mirror single-source.
+    this._unprepareMirror()
 
     // Protected source views never print — the exfiltration guard blanks
     // the live viewer via @media print, and the emitted mirror carries the
@@ -557,9 +618,13 @@ export class ViewDocs extends BaseComponent {
     // check reads the node (not the payload) so a print fired before the
     // fetch lands is still guarded.
     if (this.node && isSourceRoot(fileIdRoot(this.node.id || CHAR_STRINGS.EMPTY))) {
+      const article = this._printMirror()
+
       const note = document.createElement(HTML_TAGS.P)
 
       note.textContent = this._toastText()
+
+      article.setAttribute(DATA_ATTRS.PRINT_DOC, ATTR_VALUES.EMPTY)
 
       article.replaceChildren(note)
 
@@ -570,11 +635,28 @@ export class ViewDocs extends BaseComponent {
 
     if (!box?.childElementCount) return
 
+    const article = this._printMirror()
+
     const clone = box.cloneNode(true) as HTMLElement
 
     clone.querySelectorAll(HTML_TAGS.CANVAS).forEach((c) => c.remove())
 
+    article.setAttribute(DATA_ATTRS.PRINT_DOC, ATTR_VALUES.EMPTY)
+
     article.replaceChildren(...Array.from(clone.childNodes))
+
+    // Diagrams can't print as cloned — the screen-palette SVGs are
+    // unreadable on paper and blocks still mid-render carry loader
+    // text. Re-render each from its stashed source with the paper
+    // theme; the tracked job lands before the gated walk, while the
+    // synchronous beforeprint path keeps the clone it already made.
+    trackPrintJob(renderMermaidBlocksForPrint(article))
+  }
+
+  /** Afterprint answer — unprepared the mirror so the next print (on any
+   *  view) never reads a stale docs document. */
+  private _onAfterPrint = (): void => {
+    this._unprepareMirror()
   }
 
   /** Lifecycle: (re)mounts the GL strip, scene and viewer content. */
@@ -758,6 +840,10 @@ export class ViewDocs extends BaseComponent {
       canvas.id = DOCS_IDS.SCENE
       canvas.className = DOCS_CLASSES.DOCS_SCENE
       canvas.setAttribute(ARIA_ATTRS.ARIA_LABEL, DOCS_STRINGS.TREE_LABEL)
+      // The architecture scene is decorative background — the print
+      // adapter retires it (no still) so docs print light, not the
+      // dark backdrop. Diagram/content canvases are unaffected.
+      canvas.setAttribute(DATA_ATTRS.PRINT_SKIP, ATTR_VALUES.EMPTY)
 
       // `webglcontextrestored` is the recovery signal — the browser hands
       // the canvas a fresh context, so a full remount rebuilds the graph.
@@ -912,6 +998,9 @@ export class ViewDocs extends BaseComponent {
     this._mapMq = null
 
     window.removeEventListener(PRINT_EVENTS.PREPARE, this._onPrintPrepare)
+    window.removeEventListener(CLIPBOARD_EVENTS.AFTER_PRINT, this._onAfterPrint)
+
+    this._unprepareMirror()
 
     this._glHandle?.destroy()
 

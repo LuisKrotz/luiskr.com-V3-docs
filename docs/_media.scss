@@ -26,9 +26,19 @@
 }
 
 // Print-screen / print exfiltration: the protected region never prints.
+// The architecture scene + GL strip are decorative backdrops — the
+// document-level canvas rule can't pierce this shadow root, so every
+// canvas hides here and the page stays ink-light. The map column and
+// boot loader are interactive chrome with no paper form.
 @media print {
   .#{$_B_DOCS}-protected,
-  .#{$_B_DOCS}-viewer {
+  .#{$_B_DOCS}-viewer,
+  .#{$_B_DOCS}-map,
+  .#{$_B_DOCS}-map-modal,
+  .#{$_B_DOCS}-map-dialog,
+  .#{$_B_DOCS}-gl,
+  .#{$_B_DOCS}-loader,
+  canvas {
     display: none;
   }
 }

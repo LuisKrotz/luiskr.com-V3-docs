@@ -1,6 +1,6 @@
 {
   "name": "@luiskr/docs",
-  "version": "1.0.0",
+  "version": "2.2.0",
   "private": true,
   "license": "UNLICENSED",
   "type": "module",
@@ -17,7 +17,10 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.config.mjs",
-    "test:coverage": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.config.mjs --coverage"
+    "test:coverage": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.config.mjs --coverage",
+    "version:patch": "yarn version --patch --no-git-tag-version",
+    "version:minor": "yarn version --minor --no-git-tag-version",
+    "version:major": "yarn version --major --no-git-tag-version"
   },
   "dependencies": {
     "@luiskr/core": "1.0.0",

@@ -17,7 +17,8 @@ import { ROUTE_NAMES } from '@core/tokens/routes/names.js'
 import { HTML_TAGS } from '@core/tokens/elements/html.js'
 import { DOCS_SELECTORS } from '@core/tokens/selectors/docs.js'
 import { READER_CLASSES } from '@core/tokens/classes/reader.js'
-import { PRINT_EVENTS } from '@core/tokens/events/dom.js'
+import { DATA_ATTRS } from '@core/tokens/attrs/data.js'
+import { CLIPBOARD_EVENTS, PRINT_EVENTS } from '@core/tokens/events/dom.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 
 /** Route-record factory for the docs portal — params.docsPath carries the sub-path. */
@@ -116,25 +117,50 @@ describe('Docs print-prepare tails', () => {
     expect(article.textContent.trim().length).toBeGreaterThan(0)
   })
 
-  test('non-file route without a content box leaves the mirror as emitted', async () => {
+  test('non-file route without a content box leaves the mirror unprepared', async () => {
     await mountAt(CHAR_STRINGS.EMPTY)
 
     const article = mkArticle()
-    const sentinel = article.querySelector(HTML_TAGS.SPAN)
 
     firePrepare()
 
-    expect(article.querySelector(HTML_TAGS.SPAN)).toBe(sentinel)
+    // The unprepare-first pass clears any stale prepared state — an
+    // unarmed bail leaves the mirror empty and unmarked so #app prints.
+    expect(article.hasAttribute(DATA_ATTRS.PRINT_DOC)).toBe(false)
+    expect(article.childElementCount).toBe(0)
   })
 
-  test('dir route (id-less node) is unprotected — mirror stays as emitted', async () => {
+  test('dir route (id-less node) is unprotected — mirror stays unprepared', async () => {
     await mountAt('docs/architecture')
 
     const article = mkArticle()
-    const sentinel = article.querySelector(HTML_TAGS.SPAN)
 
     firePrepare()
 
-    expect(article.querySelector(HTML_TAGS.SPAN)).toBe(sentinel)
+    expect(article.hasAttribute(DATA_ATTRS.PRINT_DOC)).toBe(false)
+    expect(article.childElementCount).toBe(0)
+  })
+
+  test('dev route without a prerendered mirror creates one, and afterprint removes it', async () => {
+    await mountAt('docs/architecture/website.md')
+
+    const box = view.shadowRoot.querySelector(DOCS_SELECTORS.CONTENT)
+
+    box.appendChild(document.createElement(HTML_TAGS.DIV))
+
+    // No <article.reader-content> in the light DOM — the dev path creates
+    // the mirror on demand and flags it for removal on the unprepared pass.
+    firePrepare()
+
+    const mirror = document.querySelector(`${HTML_TAGS.ARTICLE}.${READER_CLASSES.CONTENT}`)
+
+    expect(mirror).not.toBeNull()
+    expect(mirror.hasAttribute(DATA_ATTRS.PRINT_DOC)).toBe(true)
+    expect(mirror.querySelector(HTML_TAGS.DIV)).not.toBeNull()
+
+    window.dispatchEvent(new window.Event(CLIPBOARD_EVENTS.AFTER_PRINT))
+
+    // The created mirror leaves the DOM outright rather than parking empty.
+    expect(document.querySelector(`${HTML_TAGS.ARTICLE}.${READER_CLASSES.CONTENT}`)).toBeNull()
   })
 })

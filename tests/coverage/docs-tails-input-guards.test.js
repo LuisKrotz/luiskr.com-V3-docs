@@ -15,6 +15,8 @@ import { ROUTE_PATHS } from '@core/tokens/routes/paths.js'
 import { ROUTE_NAMES } from '@core/tokens/routes/names.js'
 import { DOCS_CLASSES } from '@core/tokens/classes/docs.js'
 import { DOCS_SELECTORS } from '@core/tokens/selectors/docs.js'
+import { DOCS_STRINGS } from '@core/tokens/strings/docs.js'
+import { DATA_ATTRS } from '@core/tokens/attrs/data.js'
 import { CHAR_STRINGS } from '@core/tokens/strings/chars.js'
 import { KEYBOARD_EVENTS, MOUSE_EVENTS } from '@core/tokens/events/dom.js'
 import { KEYS } from '@core/tokens/primitives.js'
@@ -153,5 +155,45 @@ describe('Docs input guards — non-plain activations keep native semantics', ()
     expect(clickSpy).toHaveBeenCalled()
 
     clickSpy.mockRestore()
+  })
+
+  test('ArrowDown on a tree row focuses the next row', async () => {
+    const items = [...view.shadowRoot.querySelectorAll(`.${DOCS_CLASSES.DOCS_TREE_ITEM}`)]
+
+    const ev = new KeyboardEvent(KEYBOARD_EVENTS.KEYDOWN, {
+      key: KEYS.ARROW_DOWN,
+      bubbles: true,
+      cancelable: true,
+    })
+
+    items[0].dispatchEvent(ev)
+
+    expect(ev.defaultPrevented).toBe(true)
+    expect(view.shadowRoot.activeElement).toBe(items[1])
+  })
+
+  test('ArrowLeft on a section member climbs to its group row', async () => {
+    const rowFor = (path) =>
+      [...view.shadowRoot.querySelectorAll(`.${DOCS_CLASSES.DOCS_TREE_ITEM}`)].find(
+        (el) => el.getAttribute(DATA_ATTRS.DATA_PATH) === path
+      )
+
+    // 'docs/sassdoc' is a member row — its real parent segment ('docs')
+    // is not a rendered row, so ArrowLeft resolves the group row through
+    // the docsGroupParent fallback ('docs/sassdoc' → 'group/docs').
+    const member = rowFor('docs/sassdoc')
+
+    expect(member).toBeTruthy()
+
+    const ev = new KeyboardEvent(KEYBOARD_EVENTS.KEYDOWN, {
+      key: KEYS.ARROW_LEFT,
+      bubbles: true,
+      cancelable: true,
+    })
+
+    member.dispatchEvent(ev)
+
+    expect(ev.defaultPrevented).toBe(true)
+    expect(view.shadowRoot.activeElement).toBe(rowFor(`${DOCS_STRINGS.GROUP_PATH_PREFIX}docs`))
   })
 })

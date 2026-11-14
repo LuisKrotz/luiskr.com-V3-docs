@@ -10,7 +10,11 @@
   display: flex;
   flex-direction: column;
   color: var(--text-primary);
-  font-family: var(--font-primary);
+  // Jost everywhere readable — Poiret One's single hairline weight made
+  // crumbs/tables/hints/mermaid illegible at any declared weight; the
+  // decorative face survives only where components re-declare it.
+  font-family: var(--font-desc);
+  font-weight: calc(300 + var(--fw-lift));
   font-size: to-rem($space-xl);
   line-height: 1.6;
   padding-top: to-rem($space-4xl);
